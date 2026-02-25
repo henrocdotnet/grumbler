@@ -1,0 +1,17 @@
+## Safeguard Review
+
+Evaluate each suggestion against the file content and diff. Apply Edward's special cases first, then full panel analysis.
+
+<FileContentContext>
+{{.FileContent}}
+</FileContentContext>
+
+<CodeDiffContext>
+{{.Diff}}
+</CodeDiffContext>
+
+<SuggestionsContext>
+{{.SuggestionsJSON}}
+</SuggestionsContext>
+
+Analyze every suggestion and return the JSON with actions for each.

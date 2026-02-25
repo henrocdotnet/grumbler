@@ -1,0 +1,16 @@
+## Code Under Review
+Mentally execute the changed code through multiple scenarios and identify real bugs that will break in production.
+{{if not .Fast}}
+Complete File Content:
+```
+{{.FileContent}}
+```
+{{end}}
+Code Diff (with line numbers):
+```
+{{.Diff}}
+```
+
+File: {{.FilePath}} ({{.Language}})
+
+Use the diff to identify changed code (+lines), then simulate execution of the modified code to detect bugs, performance issues, and security vulnerabilities that will actually occur.
