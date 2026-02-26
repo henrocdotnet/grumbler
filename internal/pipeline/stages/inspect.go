@@ -12,15 +12,16 @@ import (
 	"github.com/henrocdotnet/grumbler/internal/pipeline"
 	"github.com/henrocdotnet/grumbler/internal/prompt"
 	"github.com/henrocdotnet/grumbler/internal/rules"
+	"github.com/pkoukk/tiktoken-go"
 	"golang.org/x/sync/errgroup"
 )
 
-// ReviewFiles performs the main code review pass using mental simulation.
-type ReviewFiles struct{}
+// Inspect performs the primary defect-detection pass using Execution Trace Analysis.
+type Inspect struct{}
 
-func (ReviewFiles) Name() string { return "review_files" }
+func (Inspect) Name() string { return "inspect" }
 
-func (ReviewFiles) Execute(ctx context.Context, rc *pipeline.ReviewContext) error {
+func (Inspect) Execute(ctx context.Context, rc *pipeline.ReviewContext) error {
 	mode := rc.Config.Review.Mode
 	if mode == "" {
 		mode = "diff"
@@ -89,17 +90,29 @@ func buildBatches(files []model.FileChange, fast bool) [][]model.FileChange {
 	return batches
 }
 
-// estimateTokens gives a rough char/4 heuristic for a file's contribution.
+// estimateTokens returns the token count for a file's contribution using tiktoken,
+// falling back to a char/4 heuristic if the encoder is unavailable.
 func estimateTokens(f model.FileChange, fast bool) int {
-	n := len(f.Patch)
+	enc, err := tiktoken.GetEncoding("cl100k_base")
+	if err != nil {
+		n := len(f.Patch)
+		if !fast {
+			n += len(f.Content)
+		}
+		t := n / 4
+		if t < 100 {
+			return 100
+		}
+		return t
+	}
+	n := len(enc.Encode(f.Patch, nil, nil))
 	if !fast {
-		n += len(f.Content)
+		n += len(enc.Encode(f.Content, nil, nil))
 	}
-	t := n / 4
-	if t < 100 {
-		t = 100
+	if n < 100 {
+		return 100
 	}
-	return t
+	return n
 }
 
 func reviewBatch(ctx context.Context, rc *pipeline.ReviewContext, systemPrompt string, files []model.FileChange) ([]model.CodeSuggestion, error) {
@@ -239,16 +252,16 @@ func reviewSingleFile(ctx context.Context, rc *pipeline.ReviewContext, f model.F
 // ---------------------------------------------------------------------
 
 type llmSuggestion struct {
-	FilePath       string `json:"filePath"`
-	Title          string `json:"title"`
-	Description    string `json:"description"`
-	Severity       string `json:"severity"`
-	Category       string `json:"category"`
-	ExistingCode   string `json:"existingCode"`
-	ImprovedCode   string `json:"improvedCode"`
-	OneSentSummary string `json:"oneSentenceSummary"`
-	StartLine      int    `json:"startLine"`
-	EndLine        int    `json:"endLine"`
+	FilePath    string `json:"filePath"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Severity    string `json:"severity"`
+	Category    string `json:"category"`
+	Snippet     string `json:"snippet"`
+	Proposal    string `json:"proposal"`
+	Synopsis    string `json:"synopsis"`
+	StartLine   int    `json:"startLine"`
+	EndLine     int    `json:"endLine"`
 }
 
 type llmReviewResponse struct {
@@ -283,18 +296,18 @@ func parseReviewResponse(raw, defaultFilePath, defaultLanguage string, pathSet m
 			}
 		}
 		result = append(result, model.CodeSuggestion{
-			FilePath:       fp,
-			Language:       lang,
-			Severity:       model.ParseSeverity(s.Severity),
-			SeverityStr:    s.Severity,
-			Category:       s.Category,
-			Title:          s.Title,
-			Description:    s.Description,
-			ExistingCode:   s.ExistingCode,
-			ImprovedCode:   s.ImprovedCode,
-			OneSentSummary: s.OneSentSummary,
-			StartLine:      s.StartLine,
-			EndLine:        s.EndLine,
+			FilePath:    fp,
+			Language:    lang,
+			Severity:    model.ParseSeverity(s.Severity),
+			SeverityStr: s.Severity,
+			Category:    s.Category,
+			Title:       s.Title,
+			Description: s.Description,
+			Snippet:     s.Snippet,
+			Proposal:    s.Proposal,
+			Synopsis:    s.Synopsis,
+			StartLine:   s.StartLine,
+			EndLine:     s.EndLine,
 		})
 	}
 

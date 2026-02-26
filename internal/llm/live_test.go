@@ -1,3 +1,5 @@
+//go:build live
+
 package llm
 
 import (
@@ -128,7 +130,7 @@ func TestLiveGoogleAPI(t *testing.T) {
 
 	model := os.Getenv("GEMINI_MODEL")
 	if model == "" {
-		model = "gemini-3.1-pro-preview"
+		model = "gemini-3-flash-preview"
 	}
 
 	provider, err := NewLangChainProvider(config.LLMConfig{

@@ -111,9 +111,9 @@ func runReview(cmd *cobra.Command, _ []string) error {
 	// Build pipeline
 	p := pipeline.New(
 		stages.Prepare{},
-		stages.ReviewFiles{},
-		stages.ClassifyRules{},
-		stages.Safeguard{},
+		stages.Inspect{},
+		stages.Compliance{},
+		stages.Vet{},
 		stages.CrossFile{},
 		stages.Aggregate{},
 	)
@@ -153,6 +153,12 @@ func runReview(cmd *cobra.Command, _ []string) error {
 	result := rc.Result()
 
 	// Persist final report
+	exchanges := lp.Exchanges()
+	for _, ex := range exchanges {
+		result.TotalPromptTokens += ex.PromptTokens
+		result.TotalCompletionTokens += ex.CompletionTokens
+	}
+
 	if rw != nil {
 		if err := rw.Final(result); err != nil {
 			glog.L().Error("final report failed", "err", err)
@@ -160,7 +166,7 @@ func runReview(cmd *cobra.Command, _ []string) error {
 		if err := rw.Markdown(result); err != nil {
 			glog.L().Error("markdown report failed", "err", err)
 		}
-		if err := rw.Conversations(lp.Exchanges()); err != nil {
+		if err := rw.Conversations(exchanges); err != nil {
 			glog.L().Error("conversations report failed", "err", err)
 		}
 		fmt.Fprintf(os.Stderr, "Report saved to %s\n", rw.Dir())

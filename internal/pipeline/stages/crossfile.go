@@ -46,9 +46,9 @@ Return JSON:
         {
             "title": "Short issue title",
             "description": "Full description with cross-file evidence",
-            "existingCode": "Code from source file",
-            "improvedCode": "Fixed code",
-            "oneSentenceSummary": "Brief summary",
+            "snippet": "Code from source file",
+            "proposal": "Fixed code",
+            "synopsis": "Brief summary",
             "filePath": "affected/file/path",
             "startLine": 1,
             "endLine": 10,
@@ -86,16 +86,16 @@ Return JSON:
 
 type crossFileResponse struct {
 	Suggestions []struct {
-		Title          string `json:"title"`
-		Description    string `json:"description"`
-		ExistingCode   string `json:"existingCode"`
-		ImprovedCode   string `json:"improvedCode"`
-		OneSentSummary string `json:"oneSentenceSummary"`
-		FilePath       string `json:"filePath"`
-		StartLine      int    `json:"startLine"`
-		EndLine        int    `json:"endLine"`
-		Category       string `json:"category"`
-		Severity       string `json:"severity"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Snippet     string `json:"snippet"`
+		Proposal    string `json:"proposal"`
+		Synopsis    string `json:"synopsis"`
+		FilePath    string `json:"filePath"`
+		StartLine   int    `json:"startLine"`
+		EndLine     int    `json:"endLine"`
+		Category    string `json:"category"`
+		Severity    string `json:"severity"`
 	} `json:"suggestions"`
 }
 
@@ -109,18 +109,18 @@ func parseCrossFileResponse(raw string) ([]model.CodeSuggestion, error) {
 	var result []model.CodeSuggestion
 	for _, s := range resp.Suggestions {
 		result = append(result, model.CodeSuggestion{
-			FilePath:       s.FilePath,
-			Language:       model.LanguageFromPath(s.FilePath),
-			Severity:       model.ParseSeverity(s.Severity),
-			SeverityStr:    s.Severity,
-			Category:       s.Category,
-			Title:          s.Title,
-			Description:    s.Description,
-			ExistingCode:   s.ExistingCode,
-			ImprovedCode:   s.ImprovedCode,
-			OneSentSummary: s.OneSentSummary,
-			StartLine:      s.StartLine,
-			EndLine:        s.EndLine,
+			FilePath:    s.FilePath,
+			Language:    model.LanguageFromPath(s.FilePath),
+			Severity:    model.ParseSeverity(s.Severity),
+			SeverityStr: s.Severity,
+			Category:    s.Category,
+			Title:       s.Title,
+			Description: s.Description,
+			Snippet:     s.Snippet,
+			Proposal:    s.Proposal,
+			Synopsis:    s.Synopsis,
+			StartLine:   s.StartLine,
+			EndLine:     s.EndLine,
 		})
 	}
 	return result, nil

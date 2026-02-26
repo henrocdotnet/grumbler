@@ -8,8 +8,8 @@ import (
 
 func TestDefaults(t *testing.T) {
 	cfg := Defaults()
-	if cfg.LLM.Provider != "anthropic" {
-		t.Errorf("default provider: got %q, want anthropic", cfg.LLM.Provider)
+	if cfg.LLM.Provider != "claude-cli" {
+		t.Errorf("default provider: got %q, want claude-cli", cfg.LLM.Provider)
 	}
 	if cfg.Review.BaseBranch != "main" {
 		t.Errorf("default base branch: got %q, want main", cfg.Review.BaseBranch)
@@ -25,7 +25,7 @@ func TestLoadMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Should return defaults
-	if cfg.LLM.Provider != "anthropic" {
+	if cfg.LLM.Provider != "claude-cli" {
 		t.Errorf("expected defaults when no config file")
 	}
 }

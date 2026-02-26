@@ -37,7 +37,7 @@ type ReviewConfig struct {
 
 type PassesConfig struct {
 	ExpertPanel bool `yaml:"expertPanel"`
-	Safeguard   bool `yaml:"safeguard"`
+	Vet         bool `yaml:"vet"`
 	CrossFile   bool `yaml:"crossFile"`
 }
 

@@ -20,7 +20,7 @@ func (Aggregate) Execute(_ context.Context, rc *pipeline.ReviewContext) error {
 	// Remove discarded suggestions (from safeguard)
 	var kept []model.CodeSuggestion
 	for _, s := range rc.Suggestions {
-		if s.SafeguardVerdict == "discard" {
+		if s.VetVerdict == "discard" {
 			continue
 		}
 		kept = append(kept, s)

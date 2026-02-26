@@ -11,15 +11,15 @@ import (
 	"github.com/henrocdotnet/grumbler/internal/prompt"
 )
 
-// ClassifyRules runs the 3-expert panel (Alice/Bob/Charles) to identify rule violations.
-type ClassifyRules struct{}
+// Compliance runs the Spock/McCoy/Scotty compliance panel to identify rule violations.
+type Compliance struct{}
 
-func (ClassifyRules) Name() string { return "classify_rules" }
+func (Compliance) Name() string { return "compliance" }
 
-func (ClassifyRules) Execute(ctx context.Context, rc *pipeline.ReviewContext) error {
-	glog.L().Debug("classify_rules entry", "enabled", rc.Config.Passes.ExpertPanel, "rulesCount", len(rc.Rules))
+func (Compliance) Execute(ctx context.Context, rc *pipeline.ReviewContext) error {
+	glog.L().Debug("compliance entry", "enabled", rc.Config.Passes.ExpertPanel, "rulesCount", len(rc.Rules))
 	if !rc.Config.Passes.ExpertPanel || len(rc.Rules) == 0 {
-		glog.L().Debug("classify_rules skipped")
+		glog.L().Debug("compliance skipped")
 		return nil
 	}
 
@@ -54,13 +54,13 @@ func (ClassifyRules) Execute(ctx context.Context, rc *pipeline.ReviewContext) er
 
 	resp, err := llm.Retry(ctx, 2, rc.Provider, msgs, llm.DefaultOpts())
 	if err != nil {
-		rc.AddError(fmt.Errorf("expert panel: %w", err))
+		rc.AddError(fmt.Errorf("compliance panel: %w", err))
 		return nil
 	}
-	glog.L().Debug("classify_rules response", "respLen", len(resp))
+	glog.L().Debug("compliance response", "respLen", len(resp))
 
 	violated := parseExpertPanelResponse(resp)
-	glog.L().Debug("classify_rules violations", "count", len(violated))
+	glog.L().Debug("compliance violations", "count", len(violated))
 
 	// Tag existing suggestions with violated rule IDs
 	violatedSet := make(map[string]bool, len(violated))
@@ -80,7 +80,7 @@ func (ClassifyRules) Execute(ctx context.Context, rc *pipeline.ReviewContext) er
 }
 
 type expertPanelViolation struct {
-	ID     string `json:"uuid"`
+	ID     string `json:"ruleId"`
 	Reason string `json:"reason"`
 }
 

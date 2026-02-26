@@ -14,15 +14,15 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Safeguard runs the 5-expert validation panel (Edward/Alice/Bob/Charles/Diana).
-type Safeguard struct{}
+// Vet runs the Worf/Data/Geordi/Troi/Picard vetting panel.
+type Vet struct{}
 
-func (Safeguard) Name() string { return "safeguard" }
+func (Vet) Name() string { return "vet" }
 
-func (Safeguard) Execute(ctx context.Context, rc *pipeline.ReviewContext) error {
-	glog.L().Debug("safeguard entry", "enabled", rc.Config.Passes.Safeguard, "suggestions", len(rc.Suggestions))
-	if !rc.Config.Passes.Safeguard || len(rc.Suggestions) == 0 {
-		glog.L().Debug("safeguard skipped")
+func (Vet) Execute(ctx context.Context, rc *pipeline.ReviewContext) error {
+	glog.L().Debug("vet entry", "enabled", rc.Config.Passes.Vet, "suggestions", len(rc.Suggestions))
+	if !rc.Config.Passes.Vet || len(rc.Suggestions) == 0 {
+		glog.L().Debug("vet skipped")
 		return nil
 	}
 
@@ -48,15 +48,15 @@ func (Safeguard) Execute(ctx context.Context, rc *pipeline.ReviewContext) error 
 		}
 
 		g.Go(func() error {
-			verdicts, err := safeguardFile(gctx, rc, file, suggestions)
+			verdicts, err := vetFile(gctx, rc, file, suggestions)
 			if err != nil {
-				glog.L().Error("safeguard file failed", "path", filePath, "err", err)
-				rc.AddError(fmt.Errorf("safeguard %s: %w", filePath, err))
+				glog.L().Error("vet file failed", "path", filePath, "err", err)
+				rc.AddError(fmt.Errorf("vet %s: %w", filePath, err))
 				return nil
 			}
-			glog.L().Debug("safeguard file done", "path", filePath, "verdicts", len(verdicts))
+			glog.L().Debug("vet file done", "path", filePath, "verdicts", len(verdicts))
 			mu.Lock()
-			applySafeguardVerdicts(rc, verdicts)
+			applyVetVerdicts(rc, verdicts)
 			mu.Unlock()
 			return nil
 		})
@@ -65,7 +65,7 @@ func (Safeguard) Execute(ctx context.Context, rc *pipeline.ReviewContext) error 
 	return g.Wait()
 }
 
-func safeguardFile(ctx context.Context, rc *pipeline.ReviewContext, file model.FileChange, suggestions []model.CodeSuggestion) ([]safeguardVerdict, error) {
+func vetFile(ctx context.Context, rc *pipeline.ReviewContext, file model.FileChange, suggestions []model.CodeSuggestion) ([]vetVerdict, error) {
 	systemPrompt, err := prompt.Render("safeguard_system", prompt.SafeguardData{})
 	if err != nil {
 		return nil, err
@@ -94,17 +94,17 @@ func safeguardFile(ctx context.Context, rc *pipeline.ReviewContext, file model.F
 	if err != nil {
 		return nil, err
 	}
-	glog.L().Debug("safeguard response", "respLen", len(resp))
+	glog.L().Debug("vet response", "respLen", len(resp))
 
-	return parseSafeguardResponse(resp)
+	return parseVetResponse(resp)
 }
 
-type safeguardVerdict struct {
+type vetVerdict struct {
 	ID                string `json:"id"`
 	SuggestionContent string `json:"suggestionContent"`
-	ExistingCode      string `json:"existingCode"`
-	ImprovedCode      string `json:"improvedCode"`
-	OneSentSummary    string `json:"oneSentenceSummary"`
+	Snippet           string `json:"snippet"`
+	Proposal          string `json:"proposal"`
+	Synopsis          string `json:"synopsis"`
 	StartLine         int    `json:"relevantLinesStart"`
 	EndLine           int    `json:"relevantLinesEnd"`
 	Label             string `json:"label"`
@@ -113,21 +113,21 @@ type safeguardVerdict struct {
 	Reason            string `json:"reason"`
 }
 
-type safeguardResponse struct {
-	Suggestions []safeguardVerdict `json:"codeSuggestions"`
+type vetResponse struct {
+	Suggestions []vetVerdict `json:"codeSuggestions"`
 }
 
-func parseSafeguardResponse(raw string) ([]safeguardVerdict, error) {
+func parseVetResponse(raw string) ([]vetVerdict, error) {
 	extracted := llm.ExtractJSON(raw)
-	var resp safeguardResponse
+	var resp vetResponse
 	if err := json.Unmarshal([]byte(extracted), &resp); err != nil {
-		return nil, fmt.Errorf("parsing safeguard response: %w", err)
+		return nil, fmt.Errorf("parsing vet response: %w", err)
 	}
 	return resp.Suggestions, nil
 }
 
-func applySafeguardVerdicts(rc *pipeline.ReviewContext, verdicts []safeguardVerdict) {
-	verdictMap := make(map[string]*safeguardVerdict, len(verdicts))
+func applyVetVerdicts(rc *pipeline.ReviewContext, verdicts []vetVerdict) {
+	verdictMap := make(map[string]*vetVerdict, len(verdicts))
 	for i := range verdicts {
 		// Match by index position since we may not have stable IDs
 		verdictMap[verdicts[i].ID] = &verdicts[i]
@@ -143,20 +143,20 @@ func applySafeguardVerdicts(rc *pipeline.ReviewContext, verdicts []safeguardVerd
 
 		switch v.Action {
 		case "discard":
-			s.SafeguardVerdict = "discard"
+			s.VetVerdict = "discard"
 		case "update":
-			s.SafeguardVerdict = "update"
-			if v.ImprovedCode != "" {
-				s.ImprovedCode = v.ImprovedCode
+			s.VetVerdict = "update"
+			if v.Proposal != "" {
+				s.Proposal = v.Proposal
 			}
 			if v.SuggestionContent != "" {
 				s.Description = v.SuggestionContent
 			}
-			if v.OneSentSummary != "" {
-				s.OneSentSummary = v.OneSentSummary
+			if v.Synopsis != "" {
+				s.Synopsis = v.Synopsis
 			}
 		default:
-			s.SafeguardVerdict = "keep"
+			s.VetVerdict = "keep"
 		}
 	}
 }

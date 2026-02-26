@@ -67,7 +67,7 @@ func TestMarkdown_FromFinalJSON(t *testing.T) {
 		{"has severity counts", func() bool { return strings.Contains(content, "**CRITICAL**") }},
 		{"has file headings", func() bool { return strings.Contains(content, "## internal/") }},
 		{"has code blocks", func() bool { return strings.Contains(content, "```go") }},
-		{"has passes", func() bool { return strings.Contains(content, "review_files") }},
+		{"has passes", func() bool { return strings.Contains(content, "inspect") }},
 		{"provider populated", func() bool { return strings.Contains(content, result.Provider) }},
 		{"suggestion count matches", func() bool {
 			// Each suggestion produces a ### heading.

@@ -1,3 +1,5 @@
+//go:build integration
+
 package integration_test
 
 import (
@@ -91,7 +93,7 @@ func TestIntegration_SingleFileReview(t *testing.T) {
 	root := repoRoot(t)
 	cfg := loadConfig(t)
 	cfg.Passes.ExpertPanel = false
-	cfg.Passes.Safeguard = false
+	cfg.Passes.Vet = false
 	cfg.Passes.CrossFile = false
 
 	provider := loadProvider(t)
@@ -105,7 +107,7 @@ func TestIntegration_SingleFileReview(t *testing.T) {
 
 	p := pipeline.New(
 		stages.Prepare{},
-		stages.ReviewFiles{},
+		stages.Inspect{},
 	)
 
 	if err := p.Run(ctx, rc); err != nil {
@@ -146,9 +148,9 @@ func TestIntegration_FullPipelineSingleFile(t *testing.T) {
 
 	p := pipeline.New(
 		stages.Prepare{},
-		stages.ReviewFiles{},
-		stages.ClassifyRules{},
-		stages.Safeguard{},
+		stages.Inspect{},
+		stages.Compliance{},
+		stages.Vet{},
 		stages.CrossFile{},
 		stages.Aggregate{},
 	)
@@ -160,7 +162,7 @@ func TestIntegration_FullPipelineSingleFile(t *testing.T) {
 	t.Logf("passes run: %v", rc.PassesRun)
 	t.Logf("final suggestions: %d", len(rc.Suggestions))
 	for i, s := range rc.Suggestions {
-		t.Logf("  [%d] %s (verdict=%s): %s", i, s.SeverityStr, s.SafeguardVerdict, s.Title)
+		t.Logf("  [%d] %s (verdict=%s): %s", i, s.SeverityStr, s.VetVerdict, s.Title)
 	}
 }
 
@@ -198,9 +200,9 @@ func TestIntegration_BranchDiff(t *testing.T) {
 
 	p := pipeline.New(
 		stages.Prepare{},
-		stages.ReviewFiles{},
-		stages.ClassifyRules{},
-		stages.Safeguard{},
+		stages.Inspect{},
+		stages.Compliance{},
+		stages.Vet{},
 		stages.CrossFile{},
 		stages.Aggregate{},
 	)

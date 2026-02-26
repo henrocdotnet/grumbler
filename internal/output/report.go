@@ -78,6 +78,12 @@ func (rw *ReportWriter) Markdown(result model.ReviewResult) error {
 	if result.Model != "" {
 		b.WriteString(fmt.Sprintf("| Model | %s |\n", result.Model))
 	}
+	if result.TotalPromptTokens > 0 {
+		b.WriteString(fmt.Sprintf("| Prompt tokens | %d |\n", result.TotalPromptTokens))
+	}
+	if result.TotalCompletionTokens > 0 {
+		b.WriteString(fmt.Sprintf("| Completion tokens | %d |\n", result.TotalCompletionTokens))
+	}
 	b.WriteString(fmt.Sprintf("| Passes | %s |\n", strings.Join(result.PassesRun, " → ")))
 	b.WriteString("\n")
 
@@ -123,22 +129,22 @@ func (rw *ReportWriter) Markdown(result model.ReviewResult) error {
 			b.WriteString(fmt.Sprintf("**Lines %d–%d**\n\n", s.StartLine, s.EndLine))
 			b.WriteString(s.Description + "\n\n")
 
-			if s.ExistingCode != "" {
+			if s.Snippet != "" {
 				lang := s.Language
 				if lang == "" {
 					lang = langFromPath(fp)
 				}
-				b.WriteString(fmt.Sprintf("**Current code:**\n```%s\n%s\n```\n\n", lang, s.ExistingCode))
+				b.WriteString(fmt.Sprintf("**Current code:**\n```%s\n%s\n```\n\n", lang, s.Snippet))
 			}
-			if s.ImprovedCode != "" {
+			if s.Proposal != "" {
 				lang := s.Language
 				if lang == "" {
 					lang = langFromPath(fp)
 				}
-				b.WriteString(fmt.Sprintf("**Suggested fix:**\n```%s\n%s\n```\n\n", lang, s.ImprovedCode))
+				b.WriteString(fmt.Sprintf("**Suggested fix:**\n```%s\n%s\n```\n\n", lang, s.Proposal))
 			}
-			if s.SafeguardVerdict != "" {
-				b.WriteString(fmt.Sprintf("*Safeguard verdict: %s*\n\n", s.SafeguardVerdict))
+			if s.VetVerdict != "" {
+				b.WriteString(fmt.Sprintf("*Vet verdict: %s*\n\n", s.VetVerdict))
 			}
 			b.WriteString("---\n\n")
 		}
@@ -179,7 +185,8 @@ func (rw *ReportWriter) Conversations(exchanges []llm.Exchange) error {
 		}
 		callNum[stage]++
 		durSec := ex.Duration.Seconds()
-		b.WriteString(fmt.Sprintf("## %s (call %d) — %.1fs\n\n", stage, callNum[stage], durSec))
+		b.WriteString(fmt.Sprintf("## %s (call %d) — %.1fs  [prompt: %d tokens | completion: %d tokens]\n\n",
+			stage, callNum[stage], durSec, ex.PromptTokens, ex.CompletionTokens))
 
 		for _, m := range ex.Messages {
 			b.WriteString(fmt.Sprintf("### %s prompt\n\n", strings.Title(m.Role)))

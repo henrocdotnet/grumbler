@@ -72,11 +72,11 @@ func WriteTerminal(w io.Writer, result model.ReviewResult) {
 		)
 		fmt.Fprintf(w, "   %s\n", s.Description)
 
-		if s.ExistingCode != "" {
-			fmt.Fprintf(w, "\n   %s\n%s\n", lineStyle.Render("existing:"), indentCode(s.ExistingCode))
+		if s.Snippet != "" {
+			fmt.Fprintf(w, "\n   %s\n%s\n", lineStyle.Render("existing:"), indentCode(s.Snippet))
 		}
-		if s.ImprovedCode != "" {
-			fmt.Fprintf(w, "\n   %s\n%s\n", lineStyle.Render("suggested:"), indentCode(s.ImprovedCode))
+		if s.Proposal != "" {
+			fmt.Fprintf(w, "\n   %s\n%s\n", lineStyle.Render("suggested:"), indentCode(s.Proposal))
 		}
 
 		if i < len(result.Suggestions)-1 {

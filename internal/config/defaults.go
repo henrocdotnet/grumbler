@@ -26,7 +26,7 @@ func Defaults() *Config {
 		},
 		Passes: PassesConfig{
 			ExpertPanel: true,
-			Safeguard:   true,
+			Vet:         true,
 			CrossFile:   true,
 		},
 		Filter: FilterConfig{
@@ -50,7 +50,7 @@ llm:
 
   # Option B: Gemini CLI (no API key needed — uses existing CLI auth)
   # provider: gemini-cli
-  # model: gemini-3.1-pro-preview
+  # model: gemini-3-flash-preview
 
   # Option C: API via langchaingo (requires API key)
   # provider: anthropic          # anthropic|openai|google|...
@@ -74,7 +74,7 @@ review:
 
 passes:
   expertPanel: true
-  safeguard: true
+  vet: true
   crossFile: true
 
 filter:
@@ -97,7 +97,7 @@ llm:
 
   # Option B: Gemini CLI (no API key needed — uses existing CLI auth)
   # provider: gemini-cli
-  # model: gemini-3.1-pro-preview
+  # model: gemini-3-flash-preview
 
   # Option C: API via langchaingo (requires API key)
   # provider: anthropic          # anthropic|openai|google|...
