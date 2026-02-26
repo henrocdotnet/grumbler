@@ -9,13 +9,18 @@ import (
 	"testing"
 	"time"
 
+	"path/filepath"
+
 	"github.com/henrocdotnet/grumbler/internal/config"
 	"github.com/henrocdotnet/grumbler/internal/git"
 	"github.com/henrocdotnet/grumbler/internal/llm"
 	glog "github.com/henrocdotnet/grumbler/internal/log"
 	"github.com/henrocdotnet/grumbler/internal/model"
+	"github.com/henrocdotnet/grumbler/internal/output"
 	"github.com/henrocdotnet/grumbler/internal/pipeline"
 	"github.com/henrocdotnet/grumbler/internal/pipeline/stages"
+	"github.com/henrocdotnet/grumbler/internal/prompt"
+	"github.com/henrocdotnet/grumbler/internal/rules"
 )
 
 func TestMain(m *testing.M) {
@@ -23,56 +28,29 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func repoRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	root, err := git.TopLevel(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return root
-}
+// TestIntegration_BasicLLMRoundTrip validates basic LLM connectivity using the configured provider.
+func TestIntegration_BasicLLMRoundTrip(t *testing.T) {
+	projDir := testProjectDir(t)
 
-// loadConfig reads the project config from the repo root.
-func loadConfig(t *testing.T) *config.Config {
-	t.Helper()
-	root := repoRoot(t)
-	cfg, err := config.Load(root)
+	cfg, err := config.Load(projDir)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	return cfg
-}
 
-// loadProvider reads the project config and constructs the configured provider.
-func loadProvider(t *testing.T) llm.Provider {
-	t.Helper()
-	cfg := loadConfig(t)
-	p, err := llm.NewProvider(cfg.LLM)
+	provider, err := llm.NewProvider(cfg.LLM)
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
 	}
-	t.Logf("using provider: %s", p.Name())
-	return p
-}
+	t.Logf("using provider: %s", provider.Name())
 
-// TestIntegration_BasicLLMRoundTrip validates basic LLM connectivity using the configured provider.
-func TestIntegration_BasicLLMRoundTrip(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	provider := loadProvider(t)
-	msgs := []llm.Message{
+	resp, err := provider.Complete(ctx, []llm.Message{
 		llm.UserMsg("What color is the sky? Reply with a single word."),
-	}
-	opts := llm.CompletionOpts{Temperature: 0, MaxTokens: 32, JSONMode: false}
-
-	resp, err := provider.Complete(ctx, msgs, opts)
+	}, llm.CompletionOpts{Temperature: 0, MaxTokens: 32})
 	if err != nil {
-		t.Fatalf("Complete failed: %v", err)
+		t.Fatalf("Complete: %v", err)
 	}
 
 	t.Logf("response: %q", resp)
@@ -81,120 +59,65 @@ func TestIntegration_BasicLLMRoundTrip(t *testing.T) {
 	}
 }
 
-// TestIntegration_SingleFileReview runs Prepare+ReviewFiles on a synthetic buggy file.
-func TestIntegration_SingleFileReview(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping in short mode")
-	}
+// TestIntegration_ReviewTestProject runs the full pipeline on the synthetic test project,
+// mirroring CLI behaviour: logging, report writing, and token accounting.
+func TestIntegration_ReviewTestProject(t *testing.T) {
+	projDir := testProjectDir(t)
+	result := runReview(t, projDir)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
+	t.Logf("passes run: %v", result.PassesRun)
+	t.Logf("suggestions: %d", len(result.Suggestions))
+	t.Logf("prompt tokens: %d  completion tokens: %d", result.TotalPromptTokens, result.TotalCompletionTokens)
 
-	root := repoRoot(t)
-	cfg := loadConfig(t)
-	cfg.Passes.ExpertPanel = false
-	cfg.Passes.Vet = false
-	cfg.Passes.CrossFile = false
-
-	provider := loadProvider(t)
-
-	rc := &pipeline.ReviewContext{
-		Config:   cfg,
-		Provider: provider,
-		RepoDir:  root,
-		Files:    []model.FileChange{buggyFile()},
-	}
-
-	p := pipeline.New(
-		stages.Prepare{},
-		stages.Inspect{},
-	)
-
-	if err := p.Run(ctx, rc); err != nil {
-		t.Fatalf("pipeline failed: %v", err)
-	}
-
-	t.Logf("suggestions: %d", len(rc.Suggestions))
-	for i, s := range rc.Suggestions {
-		t.Logf("  [%d] %s: %s (filePath=%s)", i, s.SeverityStr, s.Title, s.FilePath)
+	for i, s := range result.Suggestions {
+		t.Logf("  [%d] %s: %s (%s)", i, s.SeverityStr, s.Title, s.FilePath)
 		if s.FilePath == "" {
 			t.Errorf("suggestion %d missing filePath", i)
 		}
 	}
-	if len(rc.Suggestions) == 0 {
-		t.Error("expected at least one suggestion for divide-by-zero bug")
+	if len(result.Suggestions) == 0 {
+		t.Error("expected at least one suggestion for the buggy service file")
+	}
+	if result.TotalPromptTokens == 0 {
+		t.Error("expected non-zero prompt token count")
 	}
 }
 
-// TestIntegration_FullPipelineSingleFile runs all 6 stages on a synthetic file.
-func TestIntegration_FullPipelineSingleFile(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping in short mode")
+// runReview mirrors the full CLI review flow: config loading, provider setup,
+// pipeline execution, report writing, and token accounting.
+func runReview(t *testing.T, projDir string) model.ReviewResult {
+	t.Helper()
+
+	if err := glog.InitTee(filepath.Join(projDir, config.Dir), os.Stderr); err != nil {
+		t.Logf("warning: init logging: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
-	defer cancel()
-
-	root := repoRoot(t)
-	cfg := loadConfig(t)
-	provider := loadProvider(t)
-
-	rc := &pipeline.ReviewContext{
-		Config:   cfg,
-		Provider: provider,
-		RepoDir:  root,
-		Files:    []model.FileChange{buggyFile()},
-	}
-
-	p := pipeline.New(
-		stages.Prepare{},
-		stages.Inspect{},
-		stages.Compliance{},
-		stages.Vet{},
-		stages.CrossFile{},
-		stages.Aggregate{},
-	)
-
-	if err := p.Run(ctx, rc); err != nil {
-		t.Fatalf("pipeline failed: %v", err)
-	}
-
-	t.Logf("passes run: %v", rc.PassesRun)
-	t.Logf("final suggestions: %d", len(rc.Suggestions))
-	for i, s := range rc.Suggestions {
-		t.Logf("  [%d] %s (verdict=%s): %s", i, s.SeverityStr, s.VetVerdict, s.Title)
-	}
-}
-
-// TestIntegration_BranchDiff runs the full pipeline on the actual branch diff against main.
-func TestIntegration_BranchDiff(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping in short mode")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
-	defer cancel()
-
-	root := repoRoot(t)
-
-	diff, err := git.GetDiff(root, "main", git.DiffBranch)
+	cfg, err := config.Load(projDir)
 	if err != nil {
-		t.Fatalf("GetDiff failed: %v", err)
-	}
-	if diff == "" {
-		t.Skip("no diff between current branch and main")
+		t.Fatalf("config.Load: %v", err)
 	}
 
-	files := git.ParseDiff(diff)
-	t.Logf("branch diff: %d files, %d bytes", len(files), len(diff))
+	if err := prompt.LoadOverrides(projDir); err != nil {
+		t.Logf("warning: loading prompt overrides: %v", err)
+	}
 
-	cfg := loadConfig(t)
-	provider := loadProvider(t)
+	provider, err := llm.NewProvider(cfg.LLM)
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	lp := llm.NewLoggingProvider(provider)
+	t.Logf("using provider: %s", provider.Name())
+
+	rulesList, err := rules.LoadRules(projDir)
+	if err != nil {
+		t.Logf("warning: loading rules: %v", err)
+	}
 
 	rc := &pipeline.ReviewContext{
 		Config:   cfg,
-		Provider: provider,
-		RepoDir:  root,
+		Provider: lp,
+		RepoDir:  projDir,
+		Rules:    rulesList,
 		DiffMode: int(git.DiffBranch),
 	}
 
@@ -207,51 +130,45 @@ func TestIntegration_BranchDiff(t *testing.T) {
 		stages.Aggregate{},
 	)
 
+	rw, err := output.NewReportWriter(projDir)
+	if err != nil {
+		t.Logf("warning: report writer: %v", err)
+	}
+
+	p.OnStep(func(name string, dur time.Duration) {
+		t.Logf("  ✓ %s (%s)", name, dur.Round(time.Millisecond))
+		if rw != nil {
+			rw.StageSnapshot(name, rc.Result())
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
 	if err := p.Run(ctx, rc); err != nil {
-		t.Fatalf("pipeline failed: %v", err)
+		t.Fatalf("pipeline: %v", err)
 	}
 
-	t.Logf("passes run: %v", rc.PassesRun)
-	t.Logf("final suggestions: %d", len(rc.Suggestions))
-	for i, s := range rc.Suggestions {
-		t.Logf("  [%d] %s: %s (%s)", i, s.SeverityStr, s.Title, s.FilePath)
+	result := rc.Result()
+
+	exchanges := lp.Exchanges()
+	for _, ex := range exchanges {
+		result.TotalPromptTokens += ex.PromptTokens
+		result.TotalCompletionTokens += ex.CompletionTokens
 	}
-}
 
-func buggyFile() model.FileChange {
-	diff := `diff --git a/buggy.go b/buggy.go
-new file mode 100644
---- /dev/null
-+++ b/buggy.go
-@@ -0,0 +1,10 @@
-+package main
-+
-+func divide(a, b int) int {
-+    return a / b
-+}
-+
-+func main() {
-+    result := divide(10, 0)
-+    println(result)
-+}
-`
-	content := `package main
-
-func divide(a, b int) int {
-    return a / b
-}
-
-func main() {
-    result := divide(10, 0)
-    println(result)
-}
-`
-	return model.FileChange{
-		Path:     "buggy.go",
-		Language: "go",
-		Status:   model.FileAdded,
-		Diff:     diff,
-		Patch:    diff,
-		Content:  content,
+	if rw != nil {
+		if err := rw.Final(result); err != nil {
+			t.Logf("warning: final report: %v", err)
+		}
+		if err := rw.Markdown(result); err != nil {
+			t.Logf("warning: markdown report: %v", err)
+		}
+		if err := rw.Conversations(exchanges); err != nil {
+			t.Logf("warning: conversations: %v", err)
+		}
+		t.Logf("report saved to %s", rw.Dir())
 	}
+
+	return result
 }

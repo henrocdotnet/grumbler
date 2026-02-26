@@ -1,4 +1,3 @@
 bin/
 .grumbler/
-logs/
-reports/
+.test-project/

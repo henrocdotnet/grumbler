@@ -1,4 +1,4 @@
-.PHONY: build install test test-seq test-live test-live-claude test-live-gemini test-live-anthropic test-live-google test-integration lint format clean
+.PHONY: build install test test-seq test-live test-live-claude test-live-gemini test-live-anthropic test-live-google test-integration test-project-reset lint format clean
 
 BINARY := grumbler
 BUILD_DIR := ./bin
@@ -28,7 +28,11 @@ test-live:
 	go test -v -count=1 -timeout 120s -tags live github.com/henrocdotnet/grumbler/internal/llm
 
 test-integration:
-	go test -v -count=1 -timeout 600s -tags integration github.com/henrocdotnet/grumbler/internal/integration
+	go test -v -count=1 -timeout 180s -tags integration github.com/henrocdotnet/grumbler/internal/integration
+
+# Delete the synthetic test project so it gets recreated on the next test-integration run.
+test-project-reset:
+	rm -rf .test-project
 
 test-live-claude:
 	go test -v -count=1 -timeout 120s -tags live -run TestLiveClaudeCLI github.com/henrocdotnet/grumbler/internal/llm

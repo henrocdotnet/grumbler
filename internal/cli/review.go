@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -51,7 +52,7 @@ func runReview(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Init logging
-	if err := glog.Init(repoRoot); err != nil {
+	if err := glog.Init(filepath.Join(repoRoot, config.Dir)); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: init logging: %v\n", err)
 	}
 
