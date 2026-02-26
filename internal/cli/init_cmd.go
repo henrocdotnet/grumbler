@@ -62,7 +62,7 @@ func initDir(base string, global bool) error {
 		if err := writeIfNotExists(filepath.Join(base, "rules.yaml"), config.DefaultRulesYAML); err != nil {
 			return err
 		}
-		if err := writeIfNotExists(filepath.Join(base, ".gitignore"), "# Ignore API keys in config\n# config.yaml\n"); err != nil {
+		if err := writeIfNotExists(filepath.Join(base, ".gitignore"), "# Ignore API keys in config\n# config.yaml\n\n# Review reports\nreports/\n"); err != nil {
 			return err
 		}
 	}

@@ -1,17 +1,17 @@
 ## Safeguard Review
 
-Evaluate each suggestion against the file content and diff. Apply Edward's special cases first, then full panel analysis.
+Assess each suggestion against the source file and diff. Apply Worf's auto-discard conditions first, then proceed to full panel analysis.
 
-<FileContentContext>
+<FileSource>
 {{.FileContent}}
-</FileContentContext>
+</FileSource>
 
-<CodeDiffContext>
+<PatchContext>
 {{.Diff}}
-</CodeDiffContext>
+</PatchContext>
 
-<SuggestionsContext>
+<ReviewItems>
 {{.SuggestionsJSON}}
-</SuggestionsContext>
+</ReviewItems>
 
-Analyze every suggestion and return the JSON with actions for each.
+Evaluate every suggestion and return the JSON specifying the action for each.

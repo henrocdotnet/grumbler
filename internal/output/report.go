@@ -15,14 +15,14 @@ import (
 
 // ReportWriter persists incremental snapshots to a reports/ directory.
 type ReportWriter struct {
-	dir string // e.g. <repoRoot>/reports/<timestamp>/
+	dir string // e.g. <repoRoot>/.grumbler/reports/<timestamp>/
 	seq int    // monotonic stage counter
 }
 
-// NewReportWriter creates a timestamped report directory under <repoRoot>/reports/.
+// NewReportWriter creates a timestamped report directory under <repoRoot>/.grumbler/reports/.
 func NewReportWriter(repoRoot string) (*ReportWriter, error) {
 	ts := time.Now().Format("2006-01-02T15-04-05")
-	dir := filepath.Join(repoRoot, "reports", ts)
+	dir := filepath.Join(repoRoot, ".grumbler", "reports", ts)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("creating report dir: %w", err)
 	}

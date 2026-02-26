@@ -1,5 +1,5 @@
 ## Code Under Review
-Mentally execute the changed code through multiple scenarios and identify real bugs that will break in production.
+Trace execution of the changed code across multiple scenarios and identify defects that will break in production.
 {{range .Files}}
 === File: {{.Path}} ({{.Language}}) ===
 {{if and .Content (not $.Fast)}}
@@ -13,5 +13,5 @@ Code Diff (with line numbers):
 {{.Diff}}
 ```
 {{end}}
-For each issue found, include the "filePath" matching the filename from the file header above.
-Use the diffs to identify changed code (+lines), then simulate execution to detect bugs, performance issues, and security vulnerabilities.
+For each defect found, set "filePath" to the filename from the file header above.
+Use the diffs to locate changed code (+lines), then trace execution to surface bugs, performance issues, and security vulnerabilities.

@@ -11,7 +11,7 @@ go install github.com/henrocdotnet/grumbler/cmd/grumbler@latest
 Or build from source:
 
 ```bash
-cd go && make build    # outputs bin/grumbler
+make build    # outputs bin/grumbler
 ```
 
 ## Quick Start
@@ -29,8 +29,14 @@ grumbler review --all
 # Review branch commits against main
 grumbler review --base main
 
-# Use Claude CLI (no API key needed)
-grumbler review --provider claude-cli
+# Use a specific model
+grumbler review --model claude-sonnet-4-6
+
+# Use Gemini CLI (no API key needed)
+grumbler review --provider gemini-cli
+
+# Filter by severity
+grumbler review --min-severity high
 
 # JSON output
 grumbler review -f json
@@ -39,13 +45,34 @@ grumbler review -f json
 grumbler review -f sarif
 ```
 
+## Flags
+
+### Global (all commands)
+
+| Flag | Description |
+|------|-------------|
+| `--provider` | LLM provider (`anthropic`, `openai`, `google`, `claude-cli`, `gemini-cli`) |
+| `--model` | LLM model override |
+| `-f`, `--format` | Output format (`terminal`, `json`, `sarif`) |
+| `--config` | Path to config directory (default: `.`) |
+
+### `review`
+
+| Flag | Description |
+|------|-------------|
+| `--base <branch>` | Review commits on current branch vs base |
+| `--all` | Include staged + unstaged changes |
+| `--fast` | Diff-only mode (skip full file content) |
+| `--concurrency <n>` | Max concurrent file reviews |
+| `--min-severity <level>` | Filter output (`low`, `medium`, `high`, `critical`) |
+
 ## LLM Providers
 
 | Provider | Flag | Auth |
 |----------|------|------|
 | Anthropic API | `--provider anthropic` | `ANTHROPIC_API_KEY` |
 | OpenAI API | `--provider openai` | `OPENAI_API_KEY` |
-| Google API | `--provider google` | `GOOGLE_API_KEY` |
+| Google API | `--provider google` | `GEMINI_API_KEY` |
 | Claude CLI | `--provider claude-cli` | Existing `claude` auth |
 | Gemini CLI | `--provider gemini-cli` | Existing `gemini` auth |
 
@@ -86,10 +113,8 @@ Put LLM credentials and personal preferences here:
 
 ```yaml
 llm:
-  provider: anthropic
-  apiKey: ${ANTHROPIC_API_KEY}
-  model: claude-sonnet-4-5-20250929
-  maxTokens: 16384
+  provider: claude-cli
+  model: claude-sonnet-4-6
 review:
   concurrency: 5
 filter:
@@ -148,8 +173,9 @@ Place `.tmpl` files in `.grumbler/prompts/` to override built-in prompt template
 ## Development
 
 ```bash
-go test ./...       # all tests
-go vet ./...        # static analysis
-make build          # build binary
-make install        # go install
+make build                              # build binary → bin/grumbler
+make install                            # go install
+go test ./...                           # all tests
+go test -v -run TestLive ./internal/llm/ # live LLM tests
+go vet ./...                            # static analysis
 ```
