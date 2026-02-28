@@ -5,98 +5,63 @@ import (
 	"io"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/glamour"
 	"github.com/henrocdotnet/grumbler/internal/model"
 )
 
-var (
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
-	fileStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
-	lineStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
-	codeStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("235")).Padding(0, 1)
-	divider    = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(strings.Repeat("─", 60))
-)
-
-func severityStyle(s model.Severity) lipgloss.Style {
-	colors := map[model.Severity]string{
-		model.SeverityCritical: "196", // red
-		model.SeverityHigh:     "208", // orange
-		model.SeverityMedium:   "220", // yellow
-		model.SeverityLow:      "75",  // blue
-		model.SeverityInfo:     "242", // gray
-	}
-	c, ok := colors[s]
-	if !ok {
-		c = "242"
-	}
-	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(c))
-}
-
-func categoryStyle(cat string) lipgloss.Style {
-	colors := map[string]string{
-		"bug":         "196",
-		"performance": "208",
-		"security":    "161",
-	}
-	c, ok := colors[strings.ToLower(cat)]
-	if !ok {
-		c = "75"
-	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(c))
-}
-
-// WriteTerminal renders suggestions as pretty terminal output.
+// WriteTerminal renders the review result as glamour-styled terminal markdown.
 func WriteTerminal(w io.Writer, result model.ReviewResult) {
-	if len(result.Suggestions) == 0 {
-		fmt.Fprintln(w, titleStyle.Render("No issues found. Code looks good!"))
-		fmt.Fprintf(w, "\n%s files reviewed | provider: %s | passes: %s\n",
-			lineStyle.Render(fmt.Sprintf("%d", result.FilesCount)),
-			lineStyle.Render(result.Provider),
-			lineStyle.Render(strings.Join(result.PassesRun, " → ")),
-		)
+	md := buildTerminalMD(result)
+	out, err := glamour.Render(md, "auto")
+	if err != nil {
+		fmt.Fprint(w, md)
 		return
 	}
-
-	header := fmt.Sprintf("Found %d issue(s)", len(result.Suggestions))
-	fmt.Fprintln(w, titleStyle.Render(header))
-	fmt.Fprintln(w)
-
-	for i, s := range result.Suggestions {
-		sevTag := severityStyle(s.Severity).Render(strings.ToUpper(s.SeverityStr))
-		catTag := categoryStyle(s.Category).Render(s.Category)
-
-		fmt.Fprintf(w, "%s  %s %s\n", sevTag, catTag, titleStyle.Render(s.Title))
-		fmt.Fprintf(w, "   %s L%d–%d\n",
-			fileStyle.Render(s.FilePath),
-			s.StartLine, s.EndLine,
-		)
-		fmt.Fprintf(w, "   %s\n", s.Description)
-
-		if s.Snippet != "" {
-			fmt.Fprintf(w, "\n   %s\n%s\n", lineStyle.Render("existing:"), indentCode(s.Snippet))
-		}
-		if s.Proposal != "" {
-			fmt.Fprintf(w, "\n   %s\n%s\n", lineStyle.Render("suggested:"), indentCode(s.Proposal))
-		}
-
-		if i < len(result.Suggestions)-1 {
-			fmt.Fprintf(w, "\n%s\n\n", divider)
-		}
-	}
-
-	fmt.Fprintf(w, "\n%s\n", divider)
-	fmt.Fprintf(w, "%s files reviewed | %s issue(s) | provider: %s | passes: %s\n",
-		lineStyle.Render(fmt.Sprintf("%d", result.FilesCount)),
-		lineStyle.Render(fmt.Sprintf("%d", len(result.Suggestions))),
-		lineStyle.Render(result.Provider),
-		lineStyle.Render(strings.Join(result.PassesRun, " → ")),
-	)
+	fmt.Fprint(w, out)
 }
 
-func indentCode(code string) string {
-	lines := strings.Split(code, "\n")
-	for i, l := range lines {
-		lines[i] = "     " + codeStyle.Render(l)
+func buildTerminalMD(result model.ReviewResult) string {
+	var b strings.Builder
+
+	if len(result.Suggestions) == 0 {
+		b.WriteString("# No issues found\n\nCode looks good!\n\n")
+	} else {
+		b.WriteString(fmt.Sprintf("# Found %d issue(s)\n\n", len(result.Suggestions)))
+		for i, s := range result.Suggestions {
+			sev := strings.ToUpper(s.SeverityStr)
+			b.WriteString(fmt.Sprintf("## %s %s — %s\n\n", severityBadge(sev), s.Category, s.Title))
+			b.WriteString(fmt.Sprintf("**%s** L%d–%d\n\n", s.FilePath, s.StartLine, s.EndLine))
+			b.WriteString(s.Description + "\n\n")
+
+			if s.Snippet != "" {
+				lang := langFromPath(s.FilePath)
+				b.WriteString(fmt.Sprintf("**existing:**\n```%s\n%s\n```\n\n", lang, s.Snippet))
+			}
+			if s.Proposal != "" {
+				lang := langFromPath(s.FilePath)
+				b.WriteString(fmt.Sprintf("**suggested:**\n```%s\n%s\n```\n\n", lang, s.Proposal))
+			}
+			if s.VetVerdict != "" {
+				b.WriteString(fmt.Sprintf("*Vet verdict: %s*\n\n", s.VetVerdict))
+			}
+			if i < len(result.Suggestions)-1 {
+				b.WriteString("---\n\n")
+			}
+		}
 	}
-	return strings.Join(lines, "\n")
+
+	// Footer
+	b.WriteString("\n---\n\n")
+	parts := []string{
+		fmt.Sprintf("%d files reviewed", result.FilesCount),
+		fmt.Sprintf("%d issue(s)", len(result.Suggestions)),
+		fmt.Sprintf("provider: `%s`", result.Provider),
+		fmt.Sprintf("passes: %s", strings.Join(result.PassesRun, " → ")),
+	}
+	if result.TotalPromptTokens > 0 || result.TotalCompletionTokens > 0 {
+		parts = append(parts, fmt.Sprintf("tokens: %d→%d", result.TotalPromptTokens, result.TotalCompletionTokens))
+	}
+	b.WriteString("*" + strings.Join(parts, " | ") + "*\n")
+
+	return b.String()
 }

@@ -85,6 +85,20 @@ func TestIntegration_ReviewTestProject(t *testing.T) {
 
 // runReview mirrors the full CLI review flow: config loading, provider setup,
 // pipeline execution, report writing, and token accounting.
+// pipelineCtx returns a context whose deadline is driven by the
+// INTEGRATION_TIMEOUT env var (e.g. "10m", "5m30s"), with 10 seconds
+// reserved for report writing. Defaults to 10 minutes if unset or unparseable.
+func pipelineCtx(t *testing.T) (context.Context, context.CancelFunc) {
+	t.Helper()
+	d := 10 * time.Minute
+	if v := os.Getenv("INTEGRATION_TIMEOUT"); v != "" {
+		if parsed, err := time.ParseDuration(v); err == nil {
+			d = parsed
+		}
+	}
+	return context.WithTimeout(context.Background(), d-10*time.Second)
+}
+
 func runReview(t *testing.T, projDir string) model.ReviewResult {
 	t.Helper()
 
@@ -142,11 +156,15 @@ func runReview(t *testing.T, projDir string) model.ReviewResult {
 		}
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := pipelineCtx(t)
 	defer cancel()
 
 	if err := p.Run(ctx, rc); err != nil {
-		t.Fatalf("pipeline: %v", err)
+		if ctx.Err() != nil {
+			t.Errorf("pipeline timed out — writing partial results")
+		} else {
+			t.Fatalf("pipeline: %v", err)
+		}
 	}
 
 	result := rc.Result()

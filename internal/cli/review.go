@@ -33,6 +33,7 @@ func init() {
 	reviewCmd.Flags().Bool("fast", false, "Diff-only mode (skip full file content)")
 	reviewCmd.Flags().Int("concurrency", 0, "Max concurrent file reviews")
 	reviewCmd.Flags().String("min-severity", "", "Minimum severity filter")
+	reviewCmd.Flags().Bool("no-rules", false, "Skip compliance pass (ignore all rules)")
 
 	rootCmd.AddCommand(reviewCmd)
 }
@@ -85,6 +86,9 @@ func runReview(cmd *cobra.Command, _ []string) error {
 	rulesList, err := rules.LoadRules(repoRoot)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: loading rules: %v\n", err)
+	}
+	if noRules, _ := cmd.Flags().GetBool("no-rules"); noRules {
+		rulesList = nil
 	}
 
 	all, _ := cmd.Flags().GetBool("all")

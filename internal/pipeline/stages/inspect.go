@@ -284,7 +284,7 @@ func parseReviewResponse(raw, defaultFilePath, defaultLanguage string, pathSet m
 	}
 
 	var result []model.CodeSuggestion
-	for _, s := range resp.Suggestions {
+	for i, s := range resp.Suggestions {
 		fp := s.FilePath
 		lang := defaultLanguage
 		if fp == "" {
@@ -295,7 +295,7 @@ func parseReviewResponse(raw, defaultFilePath, defaultLanguage string, pathSet m
 				lang = l
 			}
 		}
-		result = append(result, model.CodeSuggestion{
+		cs := model.CodeSuggestion{
 			FilePath:    fp,
 			Language:    lang,
 			Severity:    model.ParseSeverity(s.Severity),
@@ -308,7 +308,11 @@ func parseReviewResponse(raw, defaultFilePath, defaultLanguage string, pathSet m
 			Synopsis:    s.Synopsis,
 			StartLine:   s.StartLine,
 			EndLine:     s.EndLine,
-		})
+		}
+		if cs.ID == "" {
+			cs.ID = fmt.Sprintf("%s:%d:%d", fp, s.StartLine, i)
+		}
+		result = append(result, cs)
 	}
 
 	return result, nil

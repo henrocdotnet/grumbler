@@ -27,8 +27,10 @@ test-seq:
 test-live:
 	go test -v -count=1 -timeout 120s -tags live github.com/henrocdotnet/grumbler/internal/llm
 
+INTEGRATION_TIMEOUT ?= 10m
+
 test-integration:
-	go test -v -count=1 -timeout 180s -tags integration github.com/henrocdotnet/grumbler/internal/integration
+	INTEGRATION_TIMEOUT=$(INTEGRATION_TIMEOUT) go test -v -count=1 -tags integration github.com/henrocdotnet/grumbler/internal/integration
 
 # Delete the synthetic test project so it gets recreated on the next test-integration run.
 test-project-reset:

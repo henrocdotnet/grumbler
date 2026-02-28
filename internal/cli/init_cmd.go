@@ -42,29 +42,14 @@ func initDir(base string, global bool) error {
 		return fmt.Errorf("cannot determine config directory")
 	}
 
-	promptsDir := filepath.Join(base, "prompts")
-	for _, d := range []string{base, promptsDir} {
-		if err := os.MkdirAll(d, 0755); err != nil {
-			return fmt.Errorf("creating %s: %w", d, err)
-		}
-	}
-
-	yamlContent := config.DefaultConfigYAML
+	var err error
 	if global {
-		yamlContent = config.DefaultGlobalConfigYAML
+		err = config.InitGlobal(base)
+	} else {
+		err = config.InitProject(base)
 	}
-
-	if err := writeIfNotExists(filepath.Join(base, "config.yaml"), yamlContent); err != nil {
+	if err != nil {
 		return err
-	}
-
-	if !global {
-		if err := writeIfNotExists(filepath.Join(base, "rules.yaml"), config.DefaultRulesYAML); err != nil {
-			return err
-		}
-		if err := writeIfNotExists(filepath.Join(base, ".gitignore"), "# Ignore API keys in config\n# config.yaml\n\n# Review reports\nreports/\n"); err != nil {
-			return err
-		}
 	}
 
 	fmt.Printf("Initialized %s\n", base)
@@ -74,16 +59,5 @@ func initDir(base string, global bool) error {
 	}
 	fmt.Printf("  prompts/     — prompt template overrides\n")
 
-	return nil
-}
-
-func writeIfNotExists(path, content string) error {
-	if _, err := os.Stat(path); err == nil {
-		fmt.Printf("  exists: %s (skipped)\n", path)
-		return nil
-	}
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
-	}
 	return nil
 }

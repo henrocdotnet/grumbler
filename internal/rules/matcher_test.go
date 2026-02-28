@@ -4,9 +4,9 @@ import "testing"
 
 func TestMatchRules(t *testing.T) {
 	rules := []Rule{
-		{ID: "r1", Title: "TS rule", Path: "src/**/*.ts"},
-		{ID: "r2", Title: "Global rule", Path: ""},
-		{ID: "r3", Title: "Go rule", Path: "**/*.go"},
+		{ID: "PROJ-001", Title: "TS rule", Path: "src/**/*.ts"},
+		{ID: "PROJ-002", Title: "Global rule", Path: ""},
+		{ID: "PROJ-003", Title: "Go rule", Path: "**/*.go"},
 	}
 
 	// TypeScript file should match r1 and r2

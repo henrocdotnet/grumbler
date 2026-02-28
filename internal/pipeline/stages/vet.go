@@ -56,7 +56,7 @@ func (Vet) Execute(ctx context.Context, rc *pipeline.ReviewContext) error {
 			}
 			glog.L().Debug("vet file done", "path", filePath, "verdicts", len(verdicts))
 			mu.Lock()
-			applyVetVerdicts(rc, verdicts)
+			applyVetVerdicts(rc, filePath, verdicts)
 			mu.Unlock()
 			return nil
 		})
@@ -90,13 +90,23 @@ func vetFile(ctx context.Context, rc *pipeline.ReviewContext, file model.FileCha
 		llm.UserMsg(userPrompt),
 	}
 
-	resp, err := llm.Retry(ctx, 2, rc.Provider, msgs, llm.DefaultOpts())
-	if err != nil {
-		return nil, err
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		resp, err := llm.Retry(ctx, 2, rc.Provider, msgs, llm.DefaultOpts())
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		glog.L().Debug("vet response", "respLen", len(resp), "attempt", attempt)
+		verdicts, err := parseVetResponse(resp)
+		if err != nil {
+			lastErr = err
+			glog.L().Warn("vet parse retry", "path", file.Path, "attempt", attempt, "err", err)
+			continue
+		}
+		return verdicts, nil
 	}
-	glog.L().Debug("vet response", "respLen", len(resp))
-
-	return parseVetResponse(resp)
+	return nil, lastErr
 }
 
 type vetVerdict struct {
@@ -126,7 +136,7 @@ func parseVetResponse(raw string) ([]vetVerdict, error) {
 	return resp.Suggestions, nil
 }
 
-func applyVetVerdicts(rc *pipeline.ReviewContext, verdicts []vetVerdict) {
+func applyVetVerdicts(rc *pipeline.ReviewContext, filePath string, verdicts []vetVerdict) {
 	verdictMap := make(map[string]*vetVerdict, len(verdicts))
 	for i := range verdicts {
 		// Match by index position since we may not have stable IDs
@@ -135,7 +145,9 @@ func applyVetVerdicts(rc *pipeline.ReviewContext, verdicts []vetVerdict) {
 
 	for i := range rc.Suggestions {
 		s := &rc.Suggestions[i]
-		// Try to match by ID or by title
+		if s.FilePath != filePath {
+			continue
+		}
 		v, ok := verdictMap[s.ID]
 		if !ok {
 			continue

@@ -2,6 +2,7 @@ package rules
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -10,12 +11,14 @@ import (
 )
 
 // LoadRules reads rules from the config directory.
+// Falls back to DefaultRules() when no user rules are found.
 func LoadRules(dir string) ([]Rule, error) {
 	path := filepath.Join(dir, config.Dir, "rules.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil // no rules file
+			slog.Info("no rules file found, using defaults", "count", len(DefaultRules()))
+			return DefaultRules(), nil
 		}
 		return nil, fmt.Errorf("reading rules: %w", err)
 	}
@@ -24,6 +27,14 @@ func LoadRules(dir string) ([]Rule, error) {
 	if err := yaml.Unmarshal(data, &rf); err != nil {
 		return nil, fmt.Errorf("parsing rules: %w", err)
 	}
+	if len(rf.Rules) == 0 {
+		slog.Info("rules file empty, using defaults", "count", len(DefaultRules()))
+		return DefaultRules(), nil
+	}
+	if err := ValidateRules(rf.Rules); err != nil {
+		return nil, fmt.Errorf("validating rules: %w", err)
+	}
+	slog.Info("loaded user rules", "count", len(rf.Rules))
 	return rf.Rules, nil
 }
 
@@ -37,6 +48,9 @@ func LoadRulesFromFile(path string) ([]Rule, error) {
 	var rf RulesFile
 	if err := yaml.Unmarshal(data, &rf); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	if err := ValidateRules(rf.Rules); err != nil {
+		return nil, fmt.Errorf("validating rules in %s: %w", path, err)
 	}
 	return rf.Rules, nil
 }

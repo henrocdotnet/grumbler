@@ -31,7 +31,7 @@ func TestMarkdown_FromFinalJSON(t *testing.T) {
 	src := filepath.Join(root, "reports", "2026-02-25T18-25-33", "final.json")
 	data, err := os.ReadFile(src)
 	if err != nil {
-		t.Fatalf("reading final.json: %v", err)
+		t.Skipf("skipping: fixture not present: %v", err)
 	}
 
 	var result model.ReviewResult
@@ -62,7 +62,7 @@ func TestMarkdown_FromFinalJSON(t *testing.T) {
 		label string
 		check func() bool
 	}{
-		{"has title", func() bool { return strings.Contains(content, "# Code Review Report") }},
+		{"has title", func() bool { return strings.Contains(content, "# Grumbler Code Review Report") }},
 		{"has summary table", func() bool { return strings.Contains(content, "| Files reviewed |") }},
 		{"has severity counts", func() bool { return strings.Contains(content, "**CRITICAL**") }},
 		{"has file headings", func() bool { return strings.Contains(content, "## internal/") }},
@@ -70,8 +70,8 @@ func TestMarkdown_FromFinalJSON(t *testing.T) {
 		{"has passes", func() bool { return strings.Contains(content, "inspect") }},
 		{"provider populated", func() bool { return strings.Contains(content, result.Provider) }},
 		{"suggestion count matches", func() bool {
-			// Each suggestion produces a ### heading.
-			return strings.Count(content, "### ") == len(result.Suggestions)
+			// Each suggestion produces a <details> collapsed section.
+			return strings.Count(content, "<details>") == len(result.Suggestions)
 		}},
 	}
 

@@ -70,33 +70,32 @@ func (rw *ReportWriter) Markdown(result model.ReviewResult) error {
 	path := filepath.Join(rw.dir, "report.md")
 
 	var b strings.Builder
-	b.WriteString("# Code Review Report\n\n")
+	b.WriteString("# Grumbler Code Review Report\n\n")
 	b.WriteString(fmt.Sprintf("| Metric | Value |\n|--------|-------|\n"))
-	b.WriteString(fmt.Sprintf("| Files reviewed | %d |\n", result.FilesCount))
-	b.WriteString(fmt.Sprintf("| Issues found | %d |\n", len(result.Suggestions)))
-	b.WriteString(fmt.Sprintf("| Provider | %s |\n", result.Provider))
-	if result.Model != "" {
-		b.WriteString(fmt.Sprintf("| Model | %s |\n", result.Model))
-	}
-	if result.TotalPromptTokens > 0 {
-		b.WriteString(fmt.Sprintf("| Prompt tokens | %d |\n", result.TotalPromptTokens))
-	}
-	if result.TotalCompletionTokens > 0 {
-		b.WriteString(fmt.Sprintf("| Completion tokens | %d |\n", result.TotalCompletionTokens))
-	}
-	b.WriteString(fmt.Sprintf("| Passes | %s |\n", strings.Join(result.PassesRun, " → ")))
-	b.WriteString("\n")
-
-	// Group suggestions by severity for the summary.
+	// Severity counts for the table.
 	counts := map[string]int{}
 	for _, s := range result.Suggestions {
 		counts[strings.ToUpper(s.SeverityStr)]++
 	}
+
+	b.WriteString(fmt.Sprintf("| **Files reviewed** | %d |\n", result.FilesCount))
+	b.WriteString(fmt.Sprintf("| **Issues found** | %d |\n", len(result.Suggestions)))
 	for _, sev := range []string{"CRITICAL", "HIGH", "MEDIUM", "LOW"} {
 		if n := counts[sev]; n > 0 {
-			b.WriteString(fmt.Sprintf("- **%s**: %d\n", sev, n))
+			b.WriteString(fmt.Sprintf("| \u00a0\u00a0\u00a0%s | %d |\n", severityBadge(sev), n))
 		}
 	}
+	b.WriteString(fmt.Sprintf("| **Provider** | %s |\n", result.Provider))
+	if result.Model != "" {
+		b.WriteString(fmt.Sprintf("| **Model** | %s |\n", result.Model))
+	}
+	if result.TotalPromptTokens > 0 {
+		b.WriteString(fmt.Sprintf("| **Prompt tokens** | %d |\n", result.TotalPromptTokens))
+	}
+	if result.TotalCompletionTokens > 0 {
+		b.WriteString(fmt.Sprintf("| **Completion tokens** | %d |\n", result.TotalCompletionTokens))
+	}
+	b.WriteString(fmt.Sprintf("| **Passes** | %s |\n", strings.Join(result.PassesRun, " → ")))
 	b.WriteString("\n---\n\n")
 
 	// Group by file.
@@ -120,33 +119,37 @@ func (rw *ReportWriter) Markdown(result model.ReviewResult) error {
 		g.suggestions = append(g.suggestions, s)
 	}
 
-	for _, fp := range order {
+	for i, fp := range order {
+		if i > 0 {
+			b.WriteString("<p align=\"center\">· · ·</p>\n\n")
+		}
 		g := grouped[fp]
 		b.WriteString(fmt.Sprintf("## %s\n\n", g.path))
 		for _, s := range g.suggestions {
 			sev := strings.ToUpper(s.SeverityStr)
-			b.WriteString(fmt.Sprintf("### %s %s — %s\n\n", severityBadge(sev), s.Category, s.Title))
+			lang := s.Language
+			if lang == "" {
+				lang = langFromPath(fp)
+			}
+
+			b.WriteString("<details>\n")
+			b.WriteString(fmt.Sprintf("<summary>%s (%s) — %s</summary>\n\n",
+				severityBadge(sev), s.Category, suggestionTLDR(s)))
+
 			b.WriteString(fmt.Sprintf("**Lines %d–%d**\n\n", s.StartLine, s.EndLine))
 			b.WriteString(s.Description + "\n\n")
 
 			if s.Snippet != "" {
-				lang := s.Language
-				if lang == "" {
-					lang = langFromPath(fp)
-				}
 				b.WriteString(fmt.Sprintf("**Current code:**\n```%s\n%s\n```\n\n", lang, s.Snippet))
 			}
 			if s.Proposal != "" {
-				lang := s.Language
-				if lang == "" {
-					lang = langFromPath(fp)
-				}
 				b.WriteString(fmt.Sprintf("**Suggested fix:**\n```%s\n%s\n```\n\n", lang, s.Proposal))
 			}
 			if s.VetVerdict != "" {
 				b.WriteString(fmt.Sprintf("*Vet verdict: %s*\n\n", s.VetVerdict))
 			}
-			b.WriteString("---\n\n")
+
+			b.WriteString("</details>\n\n")
 		}
 	}
 
@@ -218,6 +221,14 @@ func truncateLines(s string, n int) string {
 		return s
 	}
 	return strings.Join(lines[:n], "\n") + "\n\n... (truncated)"
+}
+
+// suggestionTLDR returns Synopsis if set, otherwise falls back to Title.
+func suggestionTLDR(s model.CodeSuggestion) string {
+	if s.Synopsis != "" {
+		return s.Synopsis
+	}
+	return s.Title
 }
 
 func severityBadge(sev string) string {
