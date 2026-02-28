@@ -14,15 +14,15 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Vet runs the Worf/Data/Geordi/Troi/Picard vetting panel.
-type Vet struct{}
+// Audit runs the Bouncer/Syntax/Logic/Style/Arbiter audit panel.
+type Audit struct{}
 
-func (Vet) Name() string { return "vet" }
+func (Audit) Name() string { return "audit" }
 
-func (Vet) Execute(ctx context.Context, rc *pipeline.ReviewContext) error {
-	glog.L().Debug("vet entry", "enabled", rc.Config.Passes.Vet, "suggestions", len(rc.Suggestions))
-	if !rc.Config.Passes.Vet || len(rc.Suggestions) == 0 {
-		glog.L().Debug("vet skipped")
+func (Audit) Execute(ctx context.Context, rc *pipeline.ReviewContext) error {
+	glog.L().Debug("audit entry", "enabled", rc.Config.Passes.Audit, "suggestions", len(rc.Suggestions))
+	if !rc.Config.Passes.Audit || len(rc.Suggestions) == 0 {
+		glog.L().Debug("audit skipped")
 		return nil
 	}
 
@@ -48,15 +48,15 @@ func (Vet) Execute(ctx context.Context, rc *pipeline.ReviewContext) error {
 		}
 
 		g.Go(func() error {
-			verdicts, err := vetFile(gctx, rc, file, suggestions)
+			verdicts, err := auditFile(gctx, rc, file, suggestions)
 			if err != nil {
-				glog.L().Error("vet file failed", "path", filePath, "err", err)
-				rc.AddError(fmt.Errorf("vet %s: %w", filePath, err))
+				glog.L().Error("audit file failed", "path", filePath, "err", err)
+				rc.AddError(fmt.Errorf("audit %s: %w", filePath, err))
 				return nil
 			}
-			glog.L().Debug("vet file done", "path", filePath, "verdicts", len(verdicts))
+			glog.L().Debug("audit file done", "path", filePath, "verdicts", len(verdicts))
 			mu.Lock()
-			applyVetVerdicts(rc, filePath, verdicts)
+			applyAuditVerdicts(rc, filePath, verdicts)
 			mu.Unlock()
 			return nil
 		})
@@ -65,7 +65,7 @@ func (Vet) Execute(ctx context.Context, rc *pipeline.ReviewContext) error {
 	return g.Wait()
 }
 
-func vetFile(ctx context.Context, rc *pipeline.ReviewContext, file model.FileChange, suggestions []model.CodeSuggestion) ([]vetVerdict, error) {
+func auditFile(ctx context.Context, rc *pipeline.ReviewContext, file model.FileChange, suggestions []model.CodeSuggestion) ([]auditVerdict, error) {
 	systemPrompt, err := prompt.Render("safeguard_system", prompt.SafeguardData{})
 	if err != nil {
 		return nil, err
@@ -97,11 +97,11 @@ func vetFile(ctx context.Context, rc *pipeline.ReviewContext, file model.FileCha
 			lastErr = err
 			continue
 		}
-		glog.L().Debug("vet response", "respLen", len(resp), "attempt", attempt)
-		verdicts, err := parseVetResponse(resp)
+		glog.L().Debug("audit response", "respLen", len(resp), "attempt", attempt)
+		verdicts, err := parseAuditResponse(resp)
 		if err != nil {
 			lastErr = err
-			glog.L().Warn("vet parse retry", "path", file.Path, "attempt", attempt, "err", err)
+			glog.L().Warn("audit parse retry", "path", file.Path, "attempt", attempt, "err", err)
 			continue
 		}
 		return verdicts, nil
@@ -109,35 +109,35 @@ func vetFile(ctx context.Context, rc *pipeline.ReviewContext, file model.FileCha
 	return nil, lastErr
 }
 
-type vetVerdict struct {
-	ID                string `json:"id"`
-	SuggestionContent string `json:"suggestionContent"`
-	Snippet           string `json:"snippet"`
-	Proposal          string `json:"proposal"`
-	Synopsis          string `json:"synopsis"`
-	StartLine         int    `json:"relevantLinesStart"`
-	EndLine           int    `json:"relevantLinesEnd"`
-	Label             string `json:"label"`
-	Severity          string `json:"severity"`
-	Action            string `json:"action"` // no_changes, update, discard
-	Reason            string `json:"reason"`
+type auditVerdict struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	Snippet     string `json:"snippet"`
+	Proposal    string `json:"proposal"`
+	Synopsis    string `json:"synopsis"`
+	StartLine   int    `json:"startLine"`
+	EndLine     int    `json:"endLine"`
+	Category    string `json:"category"`
+	Severity    string `json:"severity"`
+	Verdict     string `json:"verdict"` // keep, revise, reject
+	Rationale   string `json:"rationale"`
 }
 
-type vetResponse struct {
-	Suggestions []vetVerdict `json:"codeSuggestions"`
+type auditResponse struct {
+	Reviews []auditVerdict `json:"reviews"`
 }
 
-func parseVetResponse(raw string) ([]vetVerdict, error) {
+func parseAuditResponse(raw string) ([]auditVerdict, error) {
 	extracted := llm.ExtractJSON(raw)
-	var resp vetResponse
+	var resp auditResponse
 	if err := json.Unmarshal([]byte(extracted), &resp); err != nil {
-		return nil, fmt.Errorf("parsing vet response: %w", err)
+		return nil, fmt.Errorf("parsing audit response: %w", err)
 	}
-	return resp.Suggestions, nil
+	return resp.Reviews, nil
 }
 
-func applyVetVerdicts(rc *pipeline.ReviewContext, filePath string, verdicts []vetVerdict) {
-	verdictMap := make(map[string]*vetVerdict, len(verdicts))
+func applyAuditVerdicts(rc *pipeline.ReviewContext, filePath string, verdicts []auditVerdict) {
+	verdictMap := make(map[string]*auditVerdict, len(verdicts))
 	for i := range verdicts {
 		// Match by index position since we may not have stable IDs
 		verdictMap[verdicts[i].ID] = &verdicts[i]
@@ -153,22 +153,22 @@ func applyVetVerdicts(rc *pipeline.ReviewContext, filePath string, verdicts []ve
 			continue
 		}
 
-		switch v.Action {
-		case "discard":
-			s.VetVerdict = "discard"
-		case "update":
-			s.VetVerdict = "update"
+		switch v.Verdict {
+		case "reject":
+			s.AuditResult = "discard"
+		case "revise":
+			s.AuditResult = "update"
 			if v.Proposal != "" {
 				s.Proposal = v.Proposal
 			}
-			if v.SuggestionContent != "" {
-				s.Description = v.SuggestionContent
+			if v.Description != "" {
+				s.Description = v.Description
 			}
 			if v.Synopsis != "" {
 				s.Synopsis = v.Synopsis
 			}
 		default:
-			s.VetVerdict = "keep"
+			s.AuditResult = "keep"
 		}
 	}
 }

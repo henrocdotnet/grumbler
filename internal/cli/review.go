@@ -24,7 +24,7 @@ func init() {
 	reviewCmd := &cobra.Command{
 		Use:   "review",
 		Short: "Review code changes against a base branch",
-		Long:  "Analyzes git diff using multi-pass LLM review with expert panel and safeguard validation.",
+		Long:  "Analyzes git diff using multi-pass LLM review with review team and audit validation.",
 		RunE:  runReview,
 	}
 
@@ -118,7 +118,7 @@ func runReview(cmd *cobra.Command, _ []string) error {
 		stages.Prepare{},
 		stages.Inspect{},
 		stages.Compliance{},
-		stages.Vet{},
+		stages.Audit{},
 		stages.CrossFile{},
 		stages.Aggregate{},
 	)

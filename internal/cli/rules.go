@@ -50,11 +50,11 @@ func runRulesList(_ *cobra.Command, _ []string) error {
 
 	fmt.Printf("Loaded %d rule(s):\n\n", len(loaded))
 	for _, r := range loaded {
-		fmt.Printf("  [%s] %s (%s)\n", r.Severity, r.Title, r.ID)
-		if r.Path != "" {
-			fmt.Printf("       path: %s\n", r.Path)
+		fmt.Printf("  [%s] %s (%s)\n", r.Severity, r.Name, r.ID)
+		if r.FileGlob != "" {
+			fmt.Printf("       glob: %s\n", r.FileGlob)
 		}
-		fmt.Printf("       %s\n\n", r.Description)
+		fmt.Printf("       %s\n\n", r.Guidance)
 	}
 
 	return nil

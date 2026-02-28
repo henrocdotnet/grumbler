@@ -36,9 +36,9 @@ type ReviewConfig struct {
 }
 
 type PassesConfig struct {
-	ExpertPanel bool `yaml:"expertPanel"`
-	Vet         bool `yaml:"vet"`
-	CrossFile   bool `yaml:"crossFile"`
+	ReviewTeam bool `yaml:"reviewTeam"`
+	Audit      bool `yaml:"audit"`
+	CrossFile  bool `yaml:"crossFile"`
 }
 
 type FilterConfig struct {

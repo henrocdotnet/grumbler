@@ -5,6 +5,7 @@ package integration_test
 import (
 	"context"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -81,6 +82,66 @@ func TestIntegration_ReviewTestProject(t *testing.T) {
 	if result.TotalPromptTokens == 0 {
 		t.Error("expected non-zero prompt token count")
 	}
+
+	// --- Assertion 1: all 15 compliance rules fired ---
+	allRules := map[string]bool{
+		"SEC-001": false, "SEC-002": false, "SEC-003": false, "SEC-004": false,
+		"ERR-001": false, "ERR-002": false, "ERR-003": false,
+		"PERF-001": false, "PERF-002": false,
+		"CONC-001": false,
+		"LOG-001":  false, "LOG-002": false,
+		"TEST-001": false,
+		"API-001":  false,
+		"RES-001":  false,
+	}
+	for _, s := range result.Suggestions {
+		for _, rid := range s.RuleIDs {
+			allRules[rid] = true
+		}
+	}
+	for rid, seen := range allRules {
+		if !seen {
+			t.Errorf("compliance rule %s never triggered", rid)
+		}
+	}
+
+	// --- Assertion 2: expected buggy files have suggestions ---
+	buggyFiles := map[string]bool{
+		"api.go": false, "api_types.go": false, "auth.go": false,
+		"cache.go": false, "decode.go": false, "deploy.go": false,
+		"handlers/http.go": false, "internal/config/loader.go": false,
+		"logger.go": false, "service.go": false,
+		"store/queries.go": false,
+	}
+	for _, s := range result.Suggestions {
+		if _, ok := buggyFiles[s.FilePath]; ok {
+			buggyFiles[s.FilePath] = true
+		}
+	}
+	for f, seen := range buggyFiles {
+		if !seen {
+			t.Errorf("buggy file %s has no suggestions", f)
+		}
+	}
+	// Soft-check files — log but don't fail. service_test.go issues are
+	// typically attributed to the source file rather than the test itself.
+	softFiles := map[string]bool{"pkg/utils/strings.go": true, "pkg/utils/math.go": true, "service_test.go": true}
+	for _, s := range result.Suggestions {
+		if softFiles[s.FilePath] {
+			t.Logf("note: soft-check file %s received suggestion: %s", s.FilePath, s.Title)
+		}
+	}
+
+	// --- Assertion 3: pipeline stages ran in expected order ---
+	wantStages := []string{"prepare", "inspect", "compliance", "audit", "crossfile", "aggregate"}
+	if !reflect.DeepEqual(result.PassesRun, wantStages) {
+		t.Errorf("stages: got %v, want %v", result.PassesRun, wantStages)
+	}
+
+	// --- Assertion 4: files count ---
+	if result.FilesCount != 14 {
+		t.Errorf("files reviewed: got %d, want 14", result.FilesCount)
+	}
 }
 
 // runReview mirrors the full CLI review flow: config loading, provider setup,
@@ -139,7 +200,7 @@ func runReview(t *testing.T, projDir string) model.ReviewResult {
 		stages.Prepare{},
 		stages.Inspect{},
 		stages.Compliance{},
-		stages.Vet{},
+		stages.Audit{},
 		stages.CrossFile{},
 		stages.Aggregate{},
 	)

@@ -12,12 +12,12 @@ func MatchRules(rules []Rule, filePath string) []Rule {
 
 	var matched []Rule
 	for _, r := range rules {
-		if r.Path == "" {
+		if r.FileGlob == "" {
 			// No path restriction — applies to all files
 			matched = append(matched, r)
 			continue
 		}
-		ok, err := doublestar.Match(r.Path, filePath)
+		ok, err := doublestar.Match(r.FileGlob, filePath)
 		if err == nil && ok {
 			matched = append(matched, r)
 		}

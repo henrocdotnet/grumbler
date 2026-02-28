@@ -10,7 +10,7 @@ import (
 var rootCmd = &cobra.Command{
 	Use:           "grumbler",
 	Short:         "AI code review for local git diffs",
-	Long:          "Multi-pass LLM review (expert panel, safeguard) applied to local git diffs.",
+	Long:          "Multi-pass LLM review (review team, audit) applied to local git diffs.",
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }

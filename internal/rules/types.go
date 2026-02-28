@@ -20,14 +20,14 @@ var ValidPrefixes = []string{
 
 // Rule represents a single code review rule.
 type Rule struct {
-	ID          string   `yaml:"id" json:"id"`
-	Title       string   `yaml:"title" json:"title"`
-	Description string   `yaml:"description" json:"description"`
-	Severity    string   `yaml:"severity" json:"severity"`
-	Path        string   `yaml:"path" json:"path"` // glob pattern
-	Tags        []string `yaml:"tags,omitempty" json:"tags,omitempty"`
-	Category    string   `yaml:"category,omitempty" json:"category,omitempty"`
-	Examples    []string `yaml:"examples,omitempty" json:"examples,omitempty"`
+	ID       string   `yaml:"id" json:"id"`
+	Name     string   `yaml:"name" json:"name"`
+	Guidance string   `yaml:"guidance" json:"guidance"`
+	Severity string   `yaml:"severity" json:"severity"`
+	FileGlob string   `yaml:"glob" json:"glob"` // glob pattern
+	Tags     []string `yaml:"tags,omitempty" json:"tags,omitempty"`
+	Category string   `yaml:"category,omitempty" json:"category,omitempty"`
+	Samples  []string `yaml:"samples,omitempty" json:"samples,omitempty"`
 }
 
 // RulesFile is the top-level structure of a rules YAML file.
@@ -58,11 +58,11 @@ func hasValidPrefix(id string) bool {
 // FormatForPrompt formats a rule for inclusion in an LLM prompt.
 func (r *Rule) FormatForPrompt() string {
 	s := "- Rule ID: " + r.ID + "\n"
-	s += "  Title: " + r.Title + "\n"
-	s += "  Description: " + r.Description + "\n"
+	s += "  Name: " + r.Name + "\n"
+	s += "  Guidance: " + r.Guidance + "\n"
 	s += "  Severity: " + r.Severity + "\n"
-	if r.Path != "" {
-		s += "  Applies to: " + r.Path + "\n"
+	if r.FileGlob != "" {
+		s += "  Applies to: " + r.FileGlob + "\n"
 	}
 	return s
 }

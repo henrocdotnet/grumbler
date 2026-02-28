@@ -49,7 +49,7 @@ func IsAdmin(u User) bool {
 }
 `
 
-const buggyCacheCode = `package main
+const buggyCacheCode = `package cache
 
 import "time"
 
@@ -72,6 +72,15 @@ func (c *Cache) Set(key, value string, ttl time.Duration) {
 func (c *Cache) Get(key string) (string, bool) {
 	e, ok := c.data[key]
 	return e.value, ok
+}
+
+// MustGet returns a value or panics — inappropriate panic in library code.
+func (c *Cache) MustGet(key string) string {
+	e, ok := c.data[key]
+	if !ok {
+		panic("cache: key not found: " + key)
+	}
+	return e.value
 }
 
 // NewCache returns a Cache whose map is nil; the first Set call will panic.
@@ -462,6 +471,8 @@ func Divide(a, b int) int {
 // HandleRequest serves user lookups over HTTP.
 func HandleRequest(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
+	// TODO: remove this debug logging before release
+	fmt.Println("DEBUG: handling request for id:", id)
 	svc := &UserService{}
 	name := svc.GetUser(id)
 	fmt.Fprintf(w, "Hello, %s", name)
@@ -472,6 +483,138 @@ func main() {
 	http.ListenAndServe(":8080", nil)
 }
 `
+
+const buggyDeployCode = `package main
+
+import (
+	"fmt"
+	"os/exec"
+)
+
+// Deploy shells out to a deploy script, concatenating user input into the command.
+func Deploy(service string) error {
+	cmd := exec.Command("bash", "-c", "deploy.sh --service "+service)
+	return cmd.Run()
+}
+
+// Ping shells out to ping, concatenating a user-supplied host into the command.
+func Ping(host string) (string, error) {
+	out, err := exec.Command("sh", "-c", "ping -c1 "+host).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("ping %s: %w", host, err)
+	}
+	return string(out), nil
+}
+`
+
+const buggyDecodeCode = `package main
+
+import (
+	"encoding/gob"
+	"encoding/json"
+	"io/ioutil"
+	"net/http"
+	"os"
+)
+
+// LoadSession deserializes a gob-encoded session from an untrusted file
+// into an interface{} — insecure deserialization.
+func LoadSession(path string) (interface{}, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	var session interface{}
+	if err := gob.NewDecoder(f).Decode(&session); err != nil {
+		return nil, err
+	}
+	return session, nil
+}
+
+// DecodeBody reads the full request body with no size limit and unmarshals
+// into an untyped interface{} — no schema validation.
+func DecodeBody(r *http.Request) (interface{}, error) {
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	var payload interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+`
+
+const buggyServiceTestCode = `package main
+
+import "testing"
+
+// TestHandleRequest_HappyPath only tests the success path;
+// no test for missing ID, invalid ID, or nil db.
+func TestHandleRequest_HappyPath(t *testing.T) {
+	// In a real test we would spin up an httptest.Server;
+	// here we just verify the function signature compiles.
+	_ = HandleRequest
+}
+
+// TestDivide only tests the happy path; no test for b==0.
+func TestDivide(t *testing.T) {
+	got := Divide(10, 2)
+	if got != 5 {
+		t.Errorf("Divide(10,2) = %d, want 5", got)
+	}
+}
+`
+
+const stableAPITypesCode = `package main
+
+// UserResponse is the public API response for a user.
+type UserResponse struct {
+	ID    int64  ` + "`json:\"id\"`" + `
+	Name  string ` + "`json:\"name\"`" + `
+	Email string ` + "`json:\"email\"`" + `
+}
+
+// ListUsers returns up to limit users.
+func ListUsers(limit int) ([]UserResponse, error) {
+	return nil, nil
+}
+
+// GetUserByID returns a single user by numeric ID.
+func GetUserByID(id int64) (*UserResponse, error) {
+	return nil, nil
+}
+`
+
+const breakingAPITypesCode = `package main
+
+// UserResponse is the public API response for a user.
+// BREAKING: Name renamed to FullName, Email field removed.
+type UserResponse struct {
+	ID       int64  ` + "`json:\"id\"`" + `
+	FullName string ` + "`json:\"full_name\"`" + `
+}
+
+// ListOpts replaces the simple limit parameter.
+type ListOpts struct {
+	Limit  int
+	Offset int
+}
+
+// ListUsers now takes ListOpts instead of int — breaking signature change.
+func ListUsers(opts ListOpts) ([]UserResponse, error) {
+	return nil, nil
+}
+
+// GetUserByID now takes string instead of int64 — breaking signature change.
+func GetUserByID(id string) (*UserResponse, error) {
+	return nil, nil
+}
+`
+
+const fixtureVersion = "3"
 
 // testProjectDir returns the path to the synthetic test project,
 // creating and initialising it if it does not already exist.
@@ -489,9 +632,13 @@ func testProjectDir(t *testing.T) string {
 
 	projDir := filepath.Join(root, ".test-project")
 
-	if _, err := os.Stat(filepath.Join(projDir, ".git")); err == nil {
-		return projDir // already initialised
+	// Fixture version guard: reinitialise if absent or stale.
+	versionFile := filepath.Join(projDir, ".fixture-version")
+	if v, err := os.ReadFile(versionFile); err == nil && string(v) == fixtureVersion {
+		return projDir // up-to-date
 	}
+	// Stale or missing — wipe and recreate.
+	os.RemoveAll(projDir)
 
 	initTestProject(t, projDir)
 	return projDir
@@ -520,6 +667,9 @@ func initTestProject(t *testing.T, dir string) {
 	if err := config.InitProject(filepath.Join(dir, config.Dir)); err != nil {
 		t.Fatalf("config.InitProject: %v", err)
 	}
+
+	// API baseline on main (for API-001 breaking-change detection).
+	writeTestFile(t, filepath.Join(dir, "api_types.go"), stableAPITypesCode)
 
 	run("git", "add", ".")
 	run("git", "commit", "--allow-empty", "-m", "Initial commit")
@@ -558,14 +708,24 @@ func initTestProject(t *testing.T, dir string) {
 	writeTestFile(t, filepath.Join(dir, "pkg", "utils", "strings.go"), goodStringsCode)
 	writeTestFile(t, filepath.Join(dir, "pkg", "utils", "math.go"), goodMathCode)
 
+	// New files for SEC-003, SEC-004, TEST-001, API-001.
+	writeTestFile(t, filepath.Join(dir, "deploy.go"), buggyDeployCode)
+	writeTestFile(t, filepath.Join(dir, "decode.go"), buggyDecodeCode)
+	writeTestFile(t, filepath.Join(dir, "service_test.go"), buggyServiceTestCode)
+	writeTestFile(t, filepath.Join(dir, "api_types.go"), breakingAPITypesCode)
+
 	run("git", "add",
 		"service.go", "auth.go", "cache.go", "api.go", "logger.go",
 		"handlers/http.go",
 		"store/queries.go",
 		"internal/config/loader.go",
 		"pkg/utils/strings.go", "pkg/utils/math.go",
+		"deploy.go", "decode.go", "service_test.go", "api_types.go",
 	)
 	run("git", "commit", "-m", "Add user service, auth, cache, API client, and logger")
+
+	// Write fixture version marker (not tracked by git).
+	writeTestFile(t, filepath.Join(dir, ".fixture-version"), fixtureVersion)
 }
 
 func writeTestFile(t *testing.T, path, content string) {

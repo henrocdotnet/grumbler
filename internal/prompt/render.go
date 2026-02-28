@@ -39,8 +39,8 @@ type ReviewDiffFile struct {
 	Content  string
 }
 
-// ExpertPanelData holds data for expert_panel_user.tmpl.
-type ExpertPanelData struct {
+// ReviewTeamData holds data for review_team_user.tmpl.
+type ReviewTeamData struct {
 	Diff      string
 	RulesJSON string
 }

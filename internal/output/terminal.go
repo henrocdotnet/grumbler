@@ -41,8 +41,8 @@ func buildTerminalMD(result model.ReviewResult) string {
 				lang := langFromPath(s.FilePath)
 				b.WriteString(fmt.Sprintf("**suggested:**\n```%s\n%s\n```\n\n", lang, s.Proposal))
 			}
-			if s.VetVerdict != "" {
-				b.WriteString(fmt.Sprintf("*Vet verdict: %s*\n\n", s.VetVerdict))
+			if s.AuditResult != "" {
+				b.WriteString(fmt.Sprintf("*Audit result: %s*\n\n", s.AuditResult))
 			}
 			if i < len(result.Suggestions)-1 {
 				b.WriteString("---\n\n")

@@ -145,8 +145,8 @@ func (rw *ReportWriter) Markdown(result model.ReviewResult) error {
 			if s.Proposal != "" {
 				b.WriteString(fmt.Sprintf("**Suggested fix:**\n```%s\n%s\n```\n\n", lang, s.Proposal))
 			}
-			if s.VetVerdict != "" {
-				b.WriteString(fmt.Sprintf("*Vet verdict: %s*\n\n", s.VetVerdict))
+			if s.AuditResult != "" {
+				b.WriteString(fmt.Sprintf("*Audit result: %s*\n\n", s.AuditResult))
 			}
 
 			b.WriteString("</details>\n\n")
