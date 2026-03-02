@@ -36,6 +36,35 @@ func TestExtractJSON_Array(t *testing.T) {
 	}
 }
 
+func TestExtractJSON_InvalidBoundaryScanCandidate(t *testing.T) {
+	// Balanced braces but not valid JSON — exercises the new debug log path.
+	// Boundary scan finds {not: valid json} at depth 0, json.Valid fails,
+	// falls through to passthrough.
+	input := `text {not: valid json} more text`
+	got := ExtractJSON(input)
+	if got != input {
+		t.Errorf("got %q, want passthrough %q", got, input)
+	}
+}
+
+func TestExtractJSON_ProseOnly(t *testing.T) {
+	input := `This is plain prose with no JSON structure at all.`
+	got := ExtractJSON(input)
+	if got != input {
+		t.Errorf("got %q, want passthrough %q", got, input)
+	}
+}
+
+func TestExtractJSON_EscapedQuotes(t *testing.T) {
+	// Embedded JSON with escaped quotes — exercises inString/backslash-skip in boundary scan.
+	input := `prefix {"key":"val\"ue"} suffix`
+	want := `{"key":"val\"ue"}`
+	got := ExtractJSON(input)
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestStripCodeFences(t *testing.T) {
 	input := "```go\nfunc main() {}\n```"
 	want := "func main() {}"

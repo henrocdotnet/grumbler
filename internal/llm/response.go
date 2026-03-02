@@ -70,6 +70,7 @@ func ExtractJSON(s string) string {
 						glog.L().Debug("ExtractJSON strategy=boundary_scan", "resultLen", len(candidate))
 						return candidate
 					}
+					glog.L().Debug("ExtractJSON boundary_scan candidate invalid", "candidateLen", len(candidate))
 				}
 			}
 		}

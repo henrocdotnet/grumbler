@@ -16,7 +16,7 @@ type CodeSuggestion struct {
 	StartLine   int      `json:"startLine" yaml:"startLine"`
 	EndLine     int      `json:"endLine" yaml:"endLine"`
 	RuleIDs     []string `json:"ruleIds,omitempty" yaml:"ruleIds,omitempty"`
-	AuditResult string   `json:"auditResult,omitempty" yaml:"auditResult,omitempty"` // keep|update|discard
+	AuditResult string   `json:"auditResult,omitempty" yaml:"auditResult,omitempty"` // fix|update|discard
 }
 
 // ReviewResult holds the complete output of a review run.

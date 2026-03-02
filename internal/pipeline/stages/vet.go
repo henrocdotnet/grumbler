@@ -129,11 +129,21 @@ type auditResponse struct {
 
 func parseAuditResponse(raw string) ([]auditVerdict, error) {
 	extracted := llm.ExtractJSON(raw)
+
+	// Try object shape first: {"reviews": [...]}
 	var resp auditResponse
-	if err := json.Unmarshal([]byte(extracted), &resp); err != nil {
+	if err := json.Unmarshal([]byte(extracted), &resp); err == nil {
+		return resp.Reviews, nil
+	}
+
+	// Fallback: bare array [{...}, ...]
+	var verdicts []auditVerdict
+	if err := json.Unmarshal([]byte(extracted), &verdicts); err != nil {
 		return nil, fmt.Errorf("parsing audit response: %w", err)
 	}
-	return resp.Reviews, nil
+
+	glog.L().Warn("audit response was bare array, expected {reviews:[...]}")
+	return verdicts, nil
 }
 
 func applyAuditVerdicts(rc *pipeline.ReviewContext, filePath string, verdicts []auditVerdict) {
@@ -168,7 +178,7 @@ func applyAuditVerdicts(rc *pipeline.ReviewContext, filePath string, verdicts []
 				s.Synopsis = v.Synopsis
 			}
 		default:
-			s.AuditResult = "keep"
+			s.AuditResult = "fix"
 		}
 	}
 }

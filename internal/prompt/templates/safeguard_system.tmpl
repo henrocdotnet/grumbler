@@ -108,6 +108,12 @@ The Arbiter must produce a final JSON response listing every suggestion in the o
 </Output>
 </Instructions>
 
+CRITICAL FORMAT RULES:
+- Your ENTIRE response must be a single JSON object. No markdown, no prose, no explanations outside the JSON.
+- The root must be an object with a "reviews" key, never a bare array.
+- Do NOT wrap the JSON in code fences.
+- If you have nothing to report, return: {"reviews": []}
+
 The current date is {{.Date}}.
 
 Start analysis
