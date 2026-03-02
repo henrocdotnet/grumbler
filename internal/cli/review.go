@@ -168,6 +168,9 @@ func runReview(cmd *cobra.Command, _ []string) error {
 		if err := rw.Final(result); err != nil {
 			glog.L().Error("final report failed", "err", err)
 		}
+		if err := rw.SARIF(result); err != nil {
+			glog.L().Error("sarif report failed", "err", err)
+		}
 		if err := rw.Markdown(result); err != nil {
 			glog.L().Error("markdown report failed", "err", err)
 		}

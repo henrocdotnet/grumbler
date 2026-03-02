@@ -90,9 +90,22 @@ type reviewTeamResponse struct {
 
 func parseReviewTeamResponse(raw string) []reviewTeamViolation {
 	extracted := llm.ExtractJSON(raw)
+
 	var resp reviewTeamResponse
 	if err := json.Unmarshal([]byte(extracted), &resp); err != nil {
-		return nil
+		// Fallback: bare array of violations.
+		var arr []reviewTeamViolation
+		if err2 := json.Unmarshal([]byte(extracted), &arr); err2 != nil {
+			preview := raw
+			if len(preview) > 200 {
+				preview = preview[:200]
+			}
+			glog.L().Warn("compliance: could not parse LLM response as JSON, treating as zero violations",
+				"err", err, "preview", preview)
+			return nil
+		}
+		glog.L().Warn("compliance: LLM returned bare array instead of {\"rules\":[...]}")
+		return arr
 	}
 	return resp.Rules
 }

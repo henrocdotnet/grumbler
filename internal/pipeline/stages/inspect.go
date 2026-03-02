@@ -278,8 +278,13 @@ func parseReviewResponse(raw, defaultFilePath, defaultLanguage string, pathSet m
 	if err := json.Unmarshal([]byte(extracted), &resp); err != nil {
 		var arr []llmSuggestion
 		if err2 := json.Unmarshal([]byte(extracted), &arr); err2 != nil {
-			return nil, fmt.Errorf("parsing review response: %w (raw: %.200s)", err, raw)
+			preview := raw
+			if len(preview) > 200 {
+				preview = preview[:200]
+			}
+			return nil, fmt.Errorf("inspect: LLM response is not valid JSON (expected {\"suggestions\":[...]} or bare array)\n  parse error: %w\n  response preview: %s", err, preview)
 		}
+		glog.L().Warn("inspect: LLM returned bare array instead of {\"suggestions\":[...]}")
 		resp.Suggestions = arr
 	}
 

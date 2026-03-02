@@ -53,7 +53,7 @@ func (rw *ReportWriter) StageSnapshot(stageName string, rc model.ReviewResult) {
 
 // Final writes the completed review result.
 func (rw *ReportWriter) Final(result model.ReviewResult) error {
-	path := filepath.Join(rw.dir, "final.json")
+	path := filepath.Join(rw.dir, "report.grumbler.json")
 	data, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal final report: %w", err)
@@ -65,7 +65,22 @@ func (rw *ReportWriter) Final(result model.ReviewResult) error {
 	return nil
 }
 
-// Markdown writes a human-readable markdown report alongside final.json.
+// SARIF writes a SARIF 2.1.0 report to the report directory.
+func (rw *ReportWriter) SARIF(result model.ReviewResult) error {
+	path := filepath.Join(rw.dir, "report.sarif.json")
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create sarif report: %w", err)
+	}
+	defer f.Close()
+	if err := WriteSARIF(f, result); err != nil {
+		return fmt.Errorf("write sarif report: %w", err)
+	}
+	glog.L().Info("sarif report saved", "path", path)
+	return nil
+}
+
+// Markdown writes a human-readable markdown report alongside the JSON reports.
 func (rw *ReportWriter) Markdown(result model.ReviewResult) error {
 	path := filepath.Join(rw.dir, "report.md")
 

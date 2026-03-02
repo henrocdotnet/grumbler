@@ -101,9 +101,18 @@ type crossFileResponse struct {
 
 func parseCrossFileResponse(raw string) ([]model.CodeSuggestion, error) {
 	extracted := llm.ExtractJSON(raw)
+
 	var resp crossFileResponse
 	if err := json.Unmarshal([]byte(extracted), &resp); err != nil {
-		return nil, err
+		// Fallback: bare array of suggestions.
+		if err2 := json.Unmarshal([]byte(extracted), &resp.Suggestions); err2 != nil {
+			preview := raw
+			if len(preview) > 200 {
+				preview = preview[:200]
+			}
+			return nil, fmt.Errorf("crossfile: LLM response is not valid JSON (expected {\"suggestions\":[...]} or bare array)\n  parse error: %w\n  response preview: %s", err, preview)
+		}
+		glog.L().Warn("crossfile: LLM returned bare array instead of {\"suggestions\":[...]}")
 	}
 
 	var result []model.CodeSuggestion

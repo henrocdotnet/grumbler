@@ -1,6 +1,7 @@
 package stages
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -40,6 +41,12 @@ func TestParseAuditResponse_ProseText(t *testing.T) {
 	_, err := parseAuditResponse(input)
 	if err == nil {
 		t.Fatal("expected error for prose input, got nil")
+	}
+	if !strings.Contains(err.Error(), "audit:") {
+		t.Errorf("error should mention 'audit:': %v", err)
+	}
+	if !strings.Contains(err.Error(), "response preview:") {
+		t.Errorf("error should include response preview: %v", err)
 	}
 }
 

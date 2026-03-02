@@ -139,10 +139,14 @@ func parseAuditResponse(raw string) ([]auditVerdict, error) {
 	// Fallback: bare array [{...}, ...]
 	var verdicts []auditVerdict
 	if err := json.Unmarshal([]byte(extracted), &verdicts); err != nil {
-		return nil, fmt.Errorf("parsing audit response: %w", err)
+		preview := raw
+		if len(preview) > 200 {
+			preview = preview[:200]
+		}
+		return nil, fmt.Errorf("audit: LLM response is not valid JSON (expected {\"reviews\":[...]} or bare array)\n  parse error: %w\n  response preview: %s", err, preview)
 	}
 
-	glog.L().Warn("audit response was bare array, expected {reviews:[...]}")
+	glog.L().Warn("audit: LLM returned bare array instead of {\"reviews\":[...]}")
 	return verdicts, nil
 }
 

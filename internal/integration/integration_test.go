@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"reflect"
 	"strings"
@@ -64,7 +65,7 @@ func TestIntegration_BasicLLMRoundTrip(t *testing.T) {
 // mirroring CLI behaviour: logging, report writing, and token accounting.
 func TestIntegration_ReviewTestProject(t *testing.T) {
 	projDir := testProjectDir(t)
-	result := runReview(t, projDir)
+	result, reportDir := runReview(t, projDir)
 
 	t.Logf("passes run: %v", result.PassesRun)
 	t.Logf("suggestions: %d", len(result.Suggestions))
@@ -142,6 +143,78 @@ func TestIntegration_ReviewTestProject(t *testing.T) {
 	if result.FilesCount != 14 {
 		t.Errorf("files reviewed: got %d, want 14", result.FilesCount)
 	}
+
+	// --- Assertion 5: report files exist and are valid ---
+	t.Run("report_grumbler_json", func(t *testing.T) {
+		data, err := os.ReadFile(filepath.Join(reportDir, "report.grumbler.json"))
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		var loaded model.ReviewResult
+		if err := json.Unmarshal(data, &loaded); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if len(loaded.Suggestions) != len(result.Suggestions) {
+			t.Errorf("suggestion count: got %d, want %d", len(loaded.Suggestions), len(result.Suggestions))
+		}
+		if loaded.FilesCount != result.FilesCount {
+			t.Errorf("files count: got %d, want %d", loaded.FilesCount, result.FilesCount)
+		}
+		if loaded.Provider == "" {
+			t.Error("provider is empty")
+		}
+	})
+
+	t.Run("report_sarif_json", func(t *testing.T) {
+		data, err := os.ReadFile(filepath.Join(reportDir, "report.sarif.json"))
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		var sarif struct {
+			Schema  string `json:"$schema"`
+			Version string `json:"version"`
+			Runs    []struct {
+				Tool struct {
+					Driver struct {
+						Name string `json:"name"`
+					} `json:"driver"`
+				} `json:"tool"`
+				Results []json.RawMessage `json:"results"`
+			} `json:"runs"`
+		}
+		if err := json.Unmarshal(data, &sarif); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if sarif.Version != "2.1.0" {
+			t.Errorf("sarif version: got %q, want 2.1.0", sarif.Version)
+		}
+		if len(sarif.Runs) != 1 {
+			t.Fatalf("sarif runs: got %d, want 1", len(sarif.Runs))
+		}
+		if sarif.Runs[0].Tool.Driver.Name != "grumbler" {
+			t.Errorf("sarif driver name: got %q, want grumbler", sarif.Runs[0].Tool.Driver.Name)
+		}
+		if len(sarif.Runs[0].Results) != len(result.Suggestions) {
+			t.Errorf("sarif results: got %d, want %d", len(sarif.Runs[0].Results), len(result.Suggestions))
+		}
+	})
+
+	t.Run("report_markdown", func(t *testing.T) {
+		data, err := os.ReadFile(filepath.Join(reportDir, "report.md"))
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		md := string(data)
+		if !strings.Contains(md, "# Grumbler Code Review Report") {
+			t.Error("missing report title")
+		}
+		if !strings.Contains(md, "Files reviewed") {
+			t.Error("missing summary table")
+		}
+		if count := strings.Count(md, "<details>"); count != len(result.Suggestions) {
+			t.Errorf("details sections: got %d, want %d", count, len(result.Suggestions))
+		}
+	})
 }
 
 // runReview mirrors the full CLI review flow: config loading, provider setup,
@@ -160,7 +233,7 @@ func pipelineCtx(t *testing.T) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), d-10*time.Second)
 }
 
-func runReview(t *testing.T, projDir string) model.ReviewResult {
+func runReview(t *testing.T, projDir string) (model.ReviewResult, string) {
 	t.Helper()
 
 	if err := glog.InitTee(filepath.Join(projDir, config.Dir), os.Stderr); err != nil {
@@ -236,18 +309,22 @@ func runReview(t *testing.T, projDir string) model.ReviewResult {
 		result.TotalCompletionTokens += ex.CompletionTokens
 	}
 
-	if rw != nil {
-		if err := rw.Final(result); err != nil {
-			t.Logf("warning: final report: %v", err)
-		}
-		if err := rw.Markdown(result); err != nil {
-			t.Logf("warning: markdown report: %v", err)
-		}
-		if err := rw.Conversations(exchanges); err != nil {
-			t.Logf("warning: conversations: %v", err)
-		}
-		t.Logf("report saved to %s", rw.Dir())
+	if rw == nil {
+		t.Fatal("report writer is nil")
 	}
+	if err := rw.Final(result); err != nil {
+		t.Fatalf("final report: %v", err)
+	}
+	if err := rw.SARIF(result); err != nil {
+		t.Fatalf("sarif report: %v", err)
+	}
+	if err := rw.Markdown(result); err != nil {
+		t.Fatalf("markdown report: %v", err)
+	}
+	if err := rw.Conversations(exchanges); err != nil {
+		t.Fatalf("conversations report: %v", err)
+	}
+	t.Logf("report saved to %s", rw.Dir())
 
-	return result
+	return result, rw.Dir()
 }
