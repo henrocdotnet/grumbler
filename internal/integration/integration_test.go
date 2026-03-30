@@ -146,7 +146,7 @@ func TestIntegration_ReviewTestProject(t *testing.T) {
 
 	// --- Assertion 5: report files exist and are valid ---
 	t.Run("report_grumbler_json", func(t *testing.T) {
-		data, err := os.ReadFile(filepath.Join(reportDir, "report.grumbler.json"))
+		data, err := os.ReadFile(filepath.Join(reportDir, "grumbler.report.json"))
 		if err != nil {
 			t.Fatalf("read: %v", err)
 		}
@@ -166,7 +166,7 @@ func TestIntegration_ReviewTestProject(t *testing.T) {
 	})
 
 	t.Run("report_sarif_json", func(t *testing.T) {
-		data, err := os.ReadFile(filepath.Join(reportDir, "report.sarif.json"))
+		data, err := os.ReadFile(filepath.Join(reportDir, "grumbler.report.sarif.json"))
 		if err != nil {
 			t.Fatalf("read: %v", err)
 		}
@@ -200,7 +200,7 @@ func TestIntegration_ReviewTestProject(t *testing.T) {
 	})
 
 	t.Run("report_markdown", func(t *testing.T) {
-		data, err := os.ReadFile(filepath.Join(reportDir, "report.md"))
+		data, err := os.ReadFile(filepath.Join(reportDir, "grumbler.report.md"))
 		if err != nil {
 			t.Fatalf("read: %v", err)
 		}

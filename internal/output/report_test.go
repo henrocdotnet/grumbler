@@ -74,7 +74,7 @@ func TestFinal_RoundTrip(t *testing.T) {
 		t.Fatalf("Final: %v", err)
 	}
 
-	path := filepath.Join(rw.dir, "report.grumbler.json")
+	path := filepath.Join(rw.dir, "grumbler.report.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read: %v", err)
@@ -116,7 +116,7 @@ func TestSARIF_File(t *testing.T) {
 		t.Fatalf("SARIF: %v", err)
 	}
 
-	path := filepath.Join(rw.dir, "report.sarif.json")
+	path := filepath.Join(rw.dir, "grumbler.report.sarif.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read: %v", err)
@@ -187,7 +187,7 @@ func TestMarkdown_Fixture(t *testing.T) {
 		t.Fatalf("Markdown: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(rw.dir, "report.md"))
+	data, err := os.ReadFile(filepath.Join(rw.dir, "grumbler.report.md"))
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -205,7 +205,10 @@ func TestMarkdown_Fixture(t *testing.T) {
 		{"passes", func() bool { return strings.Contains(md, "prepare") }},
 		{"file heading", func() bool { return strings.Contains(md, "## internal/api.go") }},
 		{"code block", func() bool { return strings.Contains(md, "```go") }},
-		{"details count", func() bool { return strings.Count(md, "<details>") == 4 }},
+		{"outer details wrapper", func() bool { return strings.Contains(md, "<strong>Grumbler Report (") }},
+		{"summary severity lines", func() bool { return strings.Contains(md, "🔴 CRITICAL: 1<br>") }},
+		{"closing details", func() bool { return strings.HasSuffix(strings.TrimSpace(md), "</details>") }},
+		{"details count", func() bool { return strings.Count(md, "<details>") == 5 }},
 		{"audit result shown", func() bool { return strings.Contains(md, "Audit result: keep") }},
 	}
 	for _, c := range checks {

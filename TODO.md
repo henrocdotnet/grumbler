@@ -6,6 +6,7 @@
 - [ ] Guardian stage: wire `guardian_system.tmpl`/`guardian_user.tmpl` into pipeline (currently prompts exist but no stage invokes them)
 - [ ] Suggestion ID generation: assign stable IDs (hash of file+line+title) for safeguard matching
 - [ ] Exit code: non-zero when critical/high severity issues found (for CI gating)
+- [ ] Need verbose mode option when running, it looks like it's just sitting there.
 
 ## Medium Priority
 

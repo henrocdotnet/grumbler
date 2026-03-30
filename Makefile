@@ -6,7 +6,7 @@ BUILD_DIR := ./bin
 build:
 	go build -o $(BUILD_DIR)/$(BINARY) ./cmd/grumbler
 
-install:
+install: build
 	go install ./cmd/grumbler
 
 test:

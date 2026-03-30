@@ -53,7 +53,7 @@ func (rw *ReportWriter) StageSnapshot(stageName string, rc model.ReviewResult) {
 
 // Final writes the completed review result.
 func (rw *ReportWriter) Final(result model.ReviewResult) error {
-	path := filepath.Join(rw.dir, "report.grumbler.json")
+	path := filepath.Join(rw.dir, "grumbler.report.json")
 	data, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal final report: %w", err)
@@ -67,7 +67,7 @@ func (rw *ReportWriter) Final(result model.ReviewResult) error {
 
 // SARIF writes a SARIF 2.1.0 report to the report directory.
 func (rw *ReportWriter) SARIF(result model.ReviewResult) error {
-	path := filepath.Join(rw.dir, "report.sarif.json")
+	path := filepath.Join(rw.dir, "grumbler.report.sarif.json")
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("create sarif report: %w", err)
@@ -82,16 +82,28 @@ func (rw *ReportWriter) SARIF(result model.ReviewResult) error {
 
 // Markdown writes a human-readable markdown report alongside the JSON reports.
 func (rw *ReportWriter) Markdown(result model.ReviewResult) error {
-	path := filepath.Join(rw.dir, "report.md")
+	path := filepath.Join(rw.dir, "grumbler.report.md")
 
-	var b strings.Builder
-	b.WriteString("# Grumbler Code Review Report\n\n")
-	b.WriteString(fmt.Sprintf("| Metric | Value |\n|--------|-------|\n"))
-	// Severity counts for the table.
+	// Severity counts used in both the summary header and the table.
 	counts := map[string]int{}
 	for _, s := range result.Suggestions {
 		counts[strings.ToUpper(s.SeverityStr)]++
 	}
+
+	nyc, _ := time.LoadLocation("America/New_York")
+	ts := time.Now().In(nyc).Format("2006/01/02 15:04:05 MST")
+
+	var b strings.Builder
+	// Outer <details> wrapper with severity summary.
+	b.WriteString("<details>\n<summary>\n")
+	b.WriteString(fmt.Sprintf("  <strong>Grumbler Report (%s)</strong><br>\n", ts))
+	for _, sev := range []string{"CRITICAL", "HIGH", "MEDIUM", "LOW"} {
+		b.WriteString(fmt.Sprintf("  %s: %d<br>\n", severityBadge(sev), counts[sev]))
+	}
+	b.WriteString("</summary>\n\n")
+
+	b.WriteString("# Grumbler Code Review Report\n\n")
+	b.WriteString(fmt.Sprintf("| Metric | Value |\n|--------|-------|\n"))
 
 	b.WriteString(fmt.Sprintf("| **Files reviewed** | %d |\n", result.FilesCount))
 	b.WriteString(fmt.Sprintf("| **Issues found** | %d |\n", len(result.Suggestions)))
@@ -155,10 +167,10 @@ func (rw *ReportWriter) Markdown(result model.ReviewResult) error {
 			b.WriteString(s.Description + "\n\n")
 
 			if s.Snippet != "" {
-				b.WriteString(fmt.Sprintf("**Current code:**\n```%s\n%s\n```\n\n", lang, s.Snippet))
+				b.WriteString(fmt.Sprintf("**Current code:**\n```%s\n%s\n```\n\n", lang, strings.TrimRight(s.Snippet, "\n")))
 			}
 			if s.Proposal != "" {
-				b.WriteString(fmt.Sprintf("**Suggested fix:**\n```%s\n%s\n```\n\n", lang, s.Proposal))
+				b.WriteString(fmt.Sprintf("**Suggested fix:**\n```%s\n%s\n```\n\n", lang, strings.TrimRight(s.Proposal, "\n")))
 			}
 			if s.AuditResult != "" {
 				b.WriteString(fmt.Sprintf("*Audit result: %s*\n\n", s.AuditResult))
@@ -167,6 +179,8 @@ func (rw *ReportWriter) Markdown(result model.ReviewResult) error {
 			b.WriteString("</details>\n\n")
 		}
 	}
+
+	b.WriteString("</details>\n")
 
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		return fmt.Errorf("write markdown report: %w", err)
