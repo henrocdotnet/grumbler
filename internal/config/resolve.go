@@ -10,6 +10,7 @@ type Overrides struct {
 	Concurrency int
 	MinSeverity string
 	MaxTokens   int
+	Publish     *bool // nil = not set by flag
 }
 
 // Apply merges non-zero overrides into cfg.
@@ -34,5 +35,8 @@ func (o *Overrides) Apply(cfg *Config) {
 	}
 	if o.MaxTokens > 0 {
 		cfg.LLM.MaxTokens = o.MaxTokens
+	}
+	if o.Publish != nil {
+		cfg.Output.Publish = *o.Publish
 	}
 }

@@ -21,11 +21,13 @@ type CodeSuggestion struct {
 
 // ReviewResult holds the complete output of a review run.
 type ReviewResult struct {
-	Suggestions           []CodeSuggestion `json:"suggestions"`
-	FilesCount            int              `json:"filesReviewed"`
-	PassesRun             []string         `json:"passesRun"`
-	Provider              string           `json:"provider"`
-	Model                 string           `json:"model,omitempty"`
-	TotalPromptTokens     int              `json:"totalPromptTokens"`
-	TotalCompletionTokens int              `json:"totalCompletionTokens"`
+	Suggestions           []CodeSuggestion `json:"suggestions" yaml:"suggestions"`
+	FilesCount            int              `json:"filesReviewed" yaml:"filesReviewed"`
+	PassesRun             []string         `json:"passesRun" yaml:"passesRun"`
+	Provider              string           `json:"provider" yaml:"provider"`
+	Model                 string           `json:"model,omitempty" yaml:"model,omitempty"`
+	TotalPromptTokens        int              `json:"totalPromptTokens" yaml:"totalPromptTokens"`
+	TotalCompletionTokens    int              `json:"totalCompletionTokens" yaml:"totalCompletionTokens"`
+	TotalCacheCreationTokens int              `json:"totalCacheCreationTokens,omitempty" yaml:"totalCacheCreationTokens,omitempty"`
+	TotalCacheReadTokens     int              `json:"totalCacheReadTokens,omitempty" yaml:"totalCacheReadTokens,omitempty"`
 }

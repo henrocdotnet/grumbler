@@ -21,8 +21,10 @@ type Exchange struct {
 	Response         string        `json:"response"`
 	Duration         time.Duration `json:"duration_ms"`
 	Error            string        `json:"error,omitempty"`
-	PromptTokens     int           `json:"promptTokens"`
-	CompletionTokens int           `json:"completionTokens"`
+	PromptTokens        int           `json:"promptTokens"`
+	CompletionTokens    int           `json:"completionTokens"`
+	CacheCreationTokens int           `json:"cacheCreationTokens,omitempty"`
+	CacheReadTokens     int           `json:"cacheReadTokens,omitempty"`
 }
 
 // countTokens returns the total token count for a set of messages using cl100k_base.
@@ -53,17 +55,34 @@ func NewLoggingProvider(inner Provider) *LoggingProvider {
 // Complete delegates to the inner provider and records the exchange.
 func (lp *LoggingProvider) Complete(ctx context.Context, msgs []Message, opts CompletionOpts) (string, error) {
 	stage, _ := ctx.Value(StageKey).(string)
-	promptToks := countTokens(msgs)
 	start := time.Now()
 	resp, err := lp.inner.Complete(ctx, msgs, opts)
-	completionToks := countTokens([]Message{{Role: "assistant", Content: resp}})
+
+	// Prefer real usage from the provider; fall back to tiktoken estimate.
+	var promptToks, completionToks, cacheCreation, cacheRead int
+	if tp, ok := lp.inner.(TokenUsageProvider); ok {
+		u := tp.LastTokenUsage()
+		promptToks = u.PromptTokens
+		completionToks = u.CompletionTokens
+		cacheCreation = u.CacheCreationTokens
+		cacheRead = u.CacheReadTokens
+	}
+	if promptToks == 0 && cacheCreation == 0 && cacheRead == 0 {
+		promptToks = countTokens(msgs)
+	}
+	if completionToks == 0 {
+		completionToks = countTokens([]Message{{Role: "assistant", Content: resp}})
+	}
+
 	ex := Exchange{
-		Stage:            stage,
-		Messages:         msgs,
-		Response:         resp,
-		Duration:         time.Since(start),
-		PromptTokens:     promptToks,
-		CompletionTokens: completionToks,
+		Stage:               stage,
+		Messages:            msgs,
+		Response:            resp,
+		Duration:            time.Since(start),
+		PromptTokens:        promptToks,
+		CompletionTokens:    completionToks,
+		CacheCreationTokens: cacheCreation,
+		CacheReadTokens:     cacheRead,
 	}
 	if err != nil {
 		ex.Error = err.Error()

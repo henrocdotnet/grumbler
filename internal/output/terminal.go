@@ -59,7 +59,11 @@ func buildTerminalMD(result model.ReviewResult) string {
 		fmt.Sprintf("passes: %s", strings.Join(result.PassesRun, " → ")),
 	}
 	if result.TotalPromptTokens > 0 || result.TotalCompletionTokens > 0 {
-		parts = append(parts, fmt.Sprintf("tokens: %d→%d", result.TotalPromptTokens, result.TotalCompletionTokens))
+		tok := fmt.Sprintf("tokens: %d→%d", result.TotalPromptTokens, result.TotalCompletionTokens)
+		if result.TotalCacheCreationTokens > 0 || result.TotalCacheReadTokens > 0 {
+			tok += fmt.Sprintf(" (cache: %d created, %d read)", result.TotalCacheCreationTokens, result.TotalCacheReadTokens)
+		}
+		parts = append(parts, tok)
 	}
 	b.WriteString("*" + strings.Join(parts, " | ") + "*\n")
 

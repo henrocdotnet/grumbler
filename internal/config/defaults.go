@@ -82,7 +82,8 @@ filter:
   maxSuggestions: 0              # 0 = unlimited
 
 output:
-  format: terminal               # terminal|json|sarif
+  format: terminal               # terminal|json|yaml|sarif
+  publish: false                 # true = repo-relative links (PR comments)
 `
 
 // DefaultGlobalConfigYAML is the scaffold for ~/.config/grumbler/config.yaml.
@@ -115,7 +116,8 @@ filter:
   maxSuggestions: 0              # 0 = unlimited
 
 output:
-  format: terminal               # terminal|json|sarif
+  format: terminal               # terminal|json|yaml|sarif
+  publish: false                 # true = repo-relative links (PR comments)
 `
 
 // DefaultRulesYAML is the scaffold written by the init command.

@@ -183,7 +183,7 @@ func TestMarkdown_Fixture(t *testing.T) {
 	rw := newTempReportWriter(t)
 	fixture := testFixture()
 
-	if err := rw.Markdown(fixture); err != nil {
+	if err := rw.Markdown(fixture, false); err != nil {
 		t.Fatalf("Markdown: %v", err)
 	}
 
@@ -203,13 +203,14 @@ func TestMarkdown_Fixture(t *testing.T) {
 		{"critical badge", func() bool { return strings.Contains(md, "CRITICAL") }},
 		{"provider", func() bool { return strings.Contains(md, "test-fixture") }},
 		{"passes", func() bool { return strings.Contains(md, "prepare") }},
-		{"file heading", func() bool { return strings.Contains(md, "## internal/api.go") }},
+		{"file heading", func() bool { return strings.Contains(md, "## [internal/api.go](../../../internal/api.go)") }},
 		{"code block", func() bool { return strings.Contains(md, "```go") }},
 		{"outer details wrapper", func() bool { return strings.Contains(md, "<strong>Grumbler Report (") }},
 		{"summary severity lines", func() bool { return strings.Contains(md, "🔴 CRITICAL: 1<br>") }},
 		{"closing details", func() bool { return strings.HasSuffix(strings.TrimSpace(md), "</details>") }},
 		{"details count", func() bool { return strings.Count(md, "<details>") == 5 }},
 		{"audit result shown", func() bool { return strings.Contains(md, "Audit result: keep") }},
+		{"changes checklist", func() bool { return strings.Contains(md, "- [ ] Fixed") }},
 	}
 	for _, c := range checks {
 		if !c.ok() {

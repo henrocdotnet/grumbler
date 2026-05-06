@@ -47,7 +47,8 @@ type FilterConfig struct {
 }
 
 type OutputConfig struct {
-	Format string `yaml:"format"`
+	Format  string `yaml:"format"`
+	Publish bool   `yaml:"publish"`
 }
 
 // Dir is the config directory name, created by `init` and read by all subsystems.

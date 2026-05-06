@@ -80,8 +80,26 @@ func (rw *ReportWriter) SARIF(result model.ReviewResult) error {
 	return nil
 }
 
+// YAML writes a YAML report to the report directory.
+func (rw *ReportWriter) YAML(result model.ReviewResult) error {
+	path := filepath.Join(rw.dir, "grumbler.report.yaml")
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create yaml report: %w", err)
+	}
+	defer f.Close()
+	if err := WriteYAML(f, result); err != nil {
+		return fmt.Errorf("write yaml report: %w", err)
+	}
+	glog.L().Info("yaml report saved", "path", path)
+	return nil
+}
+
 // Markdown writes a human-readable markdown report alongside the JSON reports.
-func (rw *ReportWriter) Markdown(result model.ReviewResult) error {
+// When publish is true, file heading links omit the ../../.. prefix (suitable for
+// GitHub PR comments where paths are repo-relative). When false, links use a
+// relative prefix so they resolve from the report directory on disk.
+func (rw *ReportWriter) Markdown(result model.ReviewResult, publish bool) error {
 	path := filepath.Join(rw.dir, "grumbler.report.md")
 
 	// Severity counts used in both the summary header and the table.
@@ -122,6 +140,12 @@ func (rw *ReportWriter) Markdown(result model.ReviewResult) error {
 	if result.TotalCompletionTokens > 0 {
 		b.WriteString(fmt.Sprintf("| **Completion tokens** | %d |\n", result.TotalCompletionTokens))
 	}
+	if result.TotalCacheCreationTokens > 0 {
+		b.WriteString(fmt.Sprintf("| **Cache creation tokens** | %d |\n", result.TotalCacheCreationTokens))
+	}
+	if result.TotalCacheReadTokens > 0 {
+		b.WriteString(fmt.Sprintf("| **Cache read tokens** | %d |\n", result.TotalCacheReadTokens))
+	}
 	b.WriteString(fmt.Sprintf("| **Passes** | %s |\n", strings.Join(result.PassesRun, " → ")))
 	b.WriteString("\n---\n\n")
 
@@ -151,7 +175,11 @@ func (rw *ReportWriter) Markdown(result model.ReviewResult) error {
 			b.WriteString("<p align=\"center\">· · ·</p>\n\n")
 		}
 		g := grouped[fp]
-		b.WriteString(fmt.Sprintf("## %s\n\n", g.path))
+		if publish {
+			b.WriteString(fmt.Sprintf("## [%s](%s)\n\n", g.path, g.path))
+		} else {
+			b.WriteString(fmt.Sprintf("## [%s](../../../%s)\n\n", g.path, g.path))
+		}
 		for _, s := range g.suggestions {
 			sev := strings.ToUpper(s.SeverityStr)
 			lang := s.Language
@@ -175,6 +203,11 @@ func (rw *ReportWriter) Markdown(result model.ReviewResult) error {
 			if s.AuditResult != "" {
 				b.WriteString(fmt.Sprintf("*Audit result: %s*\n\n", s.AuditResult))
 			}
+
+			b.WriteString("**Changes:**\n")
+			b.WriteString("- [ ] Fixed\n")
+			b.WriteString("- [ ] Won't Fix\n")
+			b.WriteString("- Description:\n\n")
 
 			b.WriteString("</details>\n\n")
 		}
@@ -217,8 +250,13 @@ func (rw *ReportWriter) Conversations(exchanges []llm.Exchange) error {
 		}
 		callNum[stage]++
 		durSec := ex.Duration.Seconds()
-		b.WriteString(fmt.Sprintf("## %s (call %d) — %.1fs  [prompt: %d tokens | completion: %d tokens]\n\n",
-			stage, callNum[stage], durSec, ex.PromptTokens, ex.CompletionTokens))
+		header := fmt.Sprintf("## %s (call %d) — %.1fs  [prompt: %d | completion: %d",
+			stage, callNum[stage], durSec, ex.PromptTokens, ex.CompletionTokens)
+		if ex.CacheCreationTokens > 0 || ex.CacheReadTokens > 0 {
+			header += fmt.Sprintf(" | cache: %d created, %d read", ex.CacheCreationTokens, ex.CacheReadTokens)
+		}
+		header += " tokens]\n\n"
+		b.WriteString(header)
 
 		for _, m := range ex.Messages {
 			b.WriteString(fmt.Sprintf("### %s prompt\n\n", strings.Title(m.Role)))

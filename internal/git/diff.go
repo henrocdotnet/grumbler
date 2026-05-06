@@ -27,6 +27,7 @@ func GetDiff(dir, base string, mode DiffMode) (string, error) {
 	case DiffAll:
 		args = []string{"diff", "HEAD", "--unified=3"}
 	case DiffBranch:
+		base = resolveRemoteRef(dir, base)
 		args = []string{"diff", base + "...HEAD", "--unified=3"}
 	default: // DiffStaged
 		args = []string{"diff", "--cached", "--unified=3"}
@@ -105,6 +106,24 @@ func parseOneFile(chunk string) model.FileChange {
 	}
 
 	return fc
+}
+
+// resolveRemoteRef returns "origin/<ref>" if that remote ref exists,
+// otherwise falls back to the local ref.
+func resolveRemoteRef(dir, ref string) string {
+	// Already qualified (e.g. "origin/main")
+	if strings.Contains(ref, "/") {
+		return ref
+	}
+	remote := "origin/" + ref
+	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", remote)
+	cmd.Dir = dir
+	if err := cmd.Run(); err == nil {
+		glog.L().Debug("resolveRemoteRef: using remote ref", "ref", remote)
+		return remote
+	}
+	glog.L().Debug("resolveRemoteRef: falling back to local ref", "ref", ref)
+	return ref
 }
 
 func splitOnPrefix(s, prefix string) []string {

@@ -34,6 +34,7 @@ func init() {
 	reviewCmd.Flags().Int("concurrency", 0, "Max concurrent file reviews")
 	reviewCmd.Flags().String("min-severity", "", "Minimum severity filter")
 	reviewCmd.Flags().Bool("no-rules", false, "Skip compliance pass (ignore all rules)")
+	reviewCmd.Flags().Bool("publish", false, "Use repo-relative links in markdown (for PR comments)")
 
 	rootCmd.AddCommand(reviewCmd)
 }
@@ -162,6 +163,8 @@ func runReview(cmd *cobra.Command, _ []string) error {
 	for _, ex := range exchanges {
 		result.TotalPromptTokens += ex.PromptTokens
 		result.TotalCompletionTokens += ex.CompletionTokens
+		result.TotalCacheCreationTokens += ex.CacheCreationTokens
+		result.TotalCacheReadTokens += ex.CacheReadTokens
 	}
 
 	if rw != nil {
@@ -171,7 +174,10 @@ func runReview(cmd *cobra.Command, _ []string) error {
 		if err := rw.SARIF(result); err != nil {
 			glog.L().Error("sarif report failed", "err", err)
 		}
-		if err := rw.Markdown(result); err != nil {
+		if err := rw.YAML(result); err != nil {
+			glog.L().Error("yaml report failed", "err", err)
+		}
+		if err := rw.Markdown(result, cfg.Output.Publish); err != nil {
 			glog.L().Error("markdown report failed", "err", err)
 		}
 		if err := rw.Conversations(exchanges); err != nil {
@@ -183,6 +189,8 @@ func runReview(cmd *cobra.Command, _ []string) error {
 	switch cfg.Output.Format {
 	case "json":
 		return output.WriteJSON(os.Stdout, result)
+	case "yaml":
+		return output.WriteYAML(os.Stdout, result)
 	case "sarif":
 		return output.WriteSARIF(os.Stdout, result)
 	default:
@@ -231,6 +239,10 @@ func buildOverrides(cmd *cobra.Command) *config.Overrides {
 	}
 	if v, _ := cmd.Flags().GetString("min-severity"); v != "" {
 		o.MinSeverity = v
+	}
+	if cmd.Flags().Changed("publish") {
+		v, _ := cmd.Flags().GetBool("publish")
+		o.Publish = &v
 	}
 	return o
 }

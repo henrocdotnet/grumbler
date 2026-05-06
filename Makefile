@@ -1,10 +1,13 @@
-.PHONY: build install test test-seq test-live test-live-claude test-live-gemini test-live-anthropic test-live-google test-integration test-project-reset lint format clean
+.PHONY: build build-shared install test test-seq test-live test-live-claude test-live-gemini test-live-anthropic test-live-google test-integration test-project-reset lint format clean
 
 BINARY := grumbler
 BUILD_DIR := ./bin
 
 build:
 	go build -o $(BUILD_DIR)/$(BINARY) ./cmd/grumbler
+
+build-shared:
+	CGO_ENABLED=0 go build -o $(BUILD_DIR)/$(BINARY) ./cmd/grumbler
 
 install: build
 	go install ./cmd/grumbler

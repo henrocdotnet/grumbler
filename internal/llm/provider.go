@@ -27,6 +27,19 @@ type Provider interface {
 	Name() string
 }
 
+// TokenUsage holds token counts from a single call, including cache breakdown.
+type TokenUsage struct {
+	PromptTokens           int
+	CompletionTokens       int
+	CacheCreationTokens    int
+	CacheReadTokens        int
+}
+
+// TokenUsageProvider is optionally implemented by providers that report real token usage.
+type TokenUsageProvider interface {
+	LastTokenUsage() TokenUsage
+}
+
 // NewProvider constructs the appropriate provider from config.
 func NewProvider(cfg config.LLMConfig) (Provider, error) {
 	switch strings.ToLower(cfg.Provider) {
