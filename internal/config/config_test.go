@@ -125,3 +125,10 @@ func TestOverridesApply(t *testing.T) {
 		t.Errorf("format override: got %q", cfg.Output.Format)
 	}
 }
+
+func TestProviderKindCodexCLI(t *testing.T) {
+	cfg := LLMConfig{Provider: "codex-cli"}
+	if got := cfg.ProviderKind(); got != "cli" {
+		t.Fatalf("ProviderKind: got %q, want cli", got)
+	}
+}

@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -44,7 +45,7 @@ func GetDiff(dir, base string, mode DiffMode) (string, error) {
 		out, err = cmd.Output()
 	}
 	if err != nil {
-		return "", fmt.Errorf("git diff: %w", err)
+		return "", fmt.Errorf("git diff %s: %w%s", strings.Join(args, " "), err, gitStderr(err))
 	}
 	glog.L().Debug("GetDiff done", "outputLen", len(out))
 	return string(out), nil
@@ -111,8 +112,8 @@ func parseOneFile(chunk string) model.FileChange {
 // resolveRemoteRef returns "origin/<ref>" if that remote ref exists,
 // otherwise falls back to the local ref.
 func resolveRemoteRef(dir, ref string) string {
-	// Already qualified (e.g. "origin/main")
-	if strings.Contains(ref, "/") {
+	// Already qualified (e.g. "origin/main" or "refs/heads/main").
+	if isQualifiedRef(dir, ref) {
 		return ref
 	}
 	remote := "origin/" + ref
@@ -124,6 +125,32 @@ func resolveRemoteRef(dir, ref string) string {
 	}
 	glog.L().Debug("resolveRemoteRef: falling back to local ref", "ref", ref)
 	return ref
+}
+
+func isQualifiedRef(dir, ref string) bool {
+	if strings.HasPrefix(ref, "refs/") {
+		return true
+	}
+	cmd := exec.Command("git", "remote")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	for _, remote := range strings.Fields(string(out)) {
+		if strings.HasPrefix(ref, remote+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func gitStderr(err error) string {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || len(exitErr.Stderr) == 0 {
+		return ""
+	}
+	return ": " + strings.TrimSpace(string(exitErr.Stderr))
 }
 
 func splitOnPrefix(s, prefix string) []string {

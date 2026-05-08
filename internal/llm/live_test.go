@@ -79,6 +79,39 @@ func TestLiveGeminiCLI(t *testing.T) {
 	}
 }
 
+// TestLiveCodexCLI sends a basic prompt to codex exec and validates the response.
+// Skipped if codex binary is not installed.
+func TestLiveCodexCLI(t *testing.T) {
+	if _, err := exec.LookPath("codex"); err != nil {
+		t.Skip("codex CLI not installed")
+	}
+
+	provider := NewCodexCLI()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	msgs := []Message{
+		UserMsg("What color is the sky? Reply with a single word."),
+	}
+
+	resp, err := provider.Complete(ctx, msgs, CompletionOpts{
+		Temperature: 0,
+		MaxTokens:   32,
+		JSONMode:    false,
+	})
+	if err != nil {
+		t.Fatalf("codex-cli error: %v", err)
+	}
+
+	resp = strings.ToLower(strings.TrimSpace(resp))
+	t.Logf("response: %q", resp)
+
+	if !strings.Contains(resp, "blue") {
+		t.Errorf("expected response containing 'blue', got: %q", resp)
+	}
+}
+
 // TestLiveAnthropicAPI sends a basic prompt via the Anthropic API (langchaingo).
 // Skipped if ANTHROPIC_API_KEY is not set.
 func TestLiveAnthropicAPI(t *testing.T) {

@@ -52,7 +52,11 @@ llm:
   # provider: gemini-cli
   # model: gemini-3-flash-preview
 
-  # Option C: API via langchaingo (requires API key)
+  # Option C: Codex CLI (no API key needed — uses existing CLI auth)
+  # provider: codex-cli
+  # model: gpt-5.5
+
+  # Option D: API via langchaingo (requires API key)
   # provider: anthropic          # anthropic|openai|google|...
   # model: claude-sonnet-4-6
   # apiKey: ${ANTHROPIC_API_KEY} # env var expansion supported
@@ -100,7 +104,11 @@ llm:
   # provider: gemini-cli
   # model: gemini-3-flash-preview
 
-  # Option C: API via langchaingo (requires API key)
+  # Option C: Codex CLI (no API key needed — uses existing CLI auth)
+  # provider: codex-cli
+  # model: gpt-5.5
+
+  # Option D: API via langchaingo (requires API key)
   # provider: anthropic          # anthropic|openai|google|...
   # model: claude-sonnet-4-6
   # apiKey: ${ANTHROPIC_API_KEY} # env var expansion supported

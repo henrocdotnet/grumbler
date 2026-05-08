@@ -1,4 +1,4 @@
-.PHONY: build build-shared install test test-seq test-live test-live-claude test-live-gemini test-live-anthropic test-live-google test-integration test-project-reset lint format clean
+.PHONY: build build-shared install test test-seq test-live test-live-claude test-live-gemini test-live-codex test-live-anthropic test-live-google test-integration test-project-reset lint format clean
 
 BINARY := grumbler
 BUILD_DIR := ./bin
@@ -44,6 +44,9 @@ test-live-claude:
 
 test-live-gemini:
 	go test -v -count=1 -timeout 120s -tags live -run TestLiveGeminiCLI github.com/henrocdotnet/grumbler/internal/llm
+
+test-live-codex:
+	go test -v -count=1 -timeout 120s -tags live -run TestLiveCodexCLI github.com/henrocdotnet/grumbler/internal/llm
 
 test-live-anthropic:
 	go test -v -count=1 -timeout 120s -tags live -run TestLiveAnthropicAPI github.com/henrocdotnet/grumbler/internal/llm

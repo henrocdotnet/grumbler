@@ -318,7 +318,7 @@ func runReview(t *testing.T, projDir string) (model.ReviewResult, string) {
 	if err := rw.SARIF(result); err != nil {
 		t.Fatalf("sarif report: %v", err)
 	}
-	if err := rw.Markdown(result); err != nil {
+	if err := rw.Markdown(result, cfg.Output.Publish); err != nil {
 		t.Fatalf("markdown report: %v", err)
 	}
 	if err := rw.Conversations(exchanges); err != nil {

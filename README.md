@@ -35,6 +35,9 @@ grumbler review --model claude-sonnet-4-6
 # Use Gemini CLI (no API key needed)
 grumbler review --provider gemini-cli
 
+# Use Codex CLI (no API key needed)
+grumbler review --provider codex-cli
+
 # Filter by severity
 grumbler review --min-severity high
 
@@ -51,7 +54,7 @@ grumbler review -f sarif
 
 | Flag | Description |
 |------|-------------|
-| `--provider` | LLM provider (`anthropic`, `openai`, `google`, `claude-cli`, `gemini-cli`) |
+| `--provider` | LLM provider (`anthropic`, `openai`, `google`, `claude-cli`, `gemini-cli`, `codex-cli`) |
 | `--model` | LLM model override |
 | `-f`, `--format` | Output format (`terminal`, `json`, `sarif`) |
 | `--config` | Path to config directory (default: `.`) |
@@ -75,8 +78,9 @@ grumbler review -f sarif
 | Google API | `--provider google` | `GEMINI_API_KEY` |
 | Claude CLI | `--provider claude-cli` | Existing `claude` auth |
 | Gemini CLI | `--provider gemini-cli` | Existing `gemini` auth |
+| Codex CLI | `--provider codex-cli` | Existing `codex` auth |
 
-CLI providers shell out to `claude -p` or `gemini -p` — zero API key setup if you already have the CLI installed.
+CLI providers shell out to `claude -p`, `gemini -p`, or `codex exec` — zero API key setup if you already have the matching CLI installed and authenticated.
 
 ## Review Pipeline
 

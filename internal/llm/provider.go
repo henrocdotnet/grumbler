@@ -29,10 +29,10 @@ type Provider interface {
 
 // TokenUsage holds token counts from a single call, including cache breakdown.
 type TokenUsage struct {
-	PromptTokens           int
-	CompletionTokens       int
-	CacheCreationTokens    int
-	CacheReadTokens        int
+	PromptTokens        int
+	CompletionTokens    int
+	CacheCreationTokens int
+	CacheReadTokens     int
 }
 
 // TokenUsageProvider is optionally implemented by providers that report real token usage.
@@ -47,6 +47,8 @@ func NewProvider(cfg config.LLMConfig) (Provider, error) {
 		return NewClaudeCLIWithModel(cfg.Model), nil
 	case "gemini-cli":
 		return NewGeminiCLIWithModel(cfg.Model), nil
+	case "codex-cli":
+		return NewCodexCLIWithModel(cfg.Model), nil
 	default:
 		return NewLangChainProvider(cfg)
 	}

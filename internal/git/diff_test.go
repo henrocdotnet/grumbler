@@ -1,6 +1,9 @@
 package git
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/henrocdotnet/grumbler/internal/model"
@@ -67,6 +70,51 @@ func TestAnnotatePatch(t *testing.T) {
 	// Should contain line numbers
 	if !containsSubstring(result, "L1") {
 		t.Error("missing line number annotation")
+	}
+}
+
+func TestResolveRemoteRefSlashedBranch(t *testing.T) {
+	dir := initGitRepo(t)
+	runGit(t, dir, "remote", "add", "origin", "https://example.invalid/repo.git")
+	runGit(t, dir, "update-ref", "refs/remotes/origin/release/2026-05-07", "HEAD")
+
+	got := resolveRemoteRef(dir, "release/2026-05-07")
+	if got != "origin/release/2026-05-07" {
+		t.Fatalf("resolveRemoteRef: got %q, want origin/release/2026-05-07", got)
+	}
+}
+
+func TestResolveRemoteRefQualifiedRemote(t *testing.T) {
+	dir := initGitRepo(t)
+	runGit(t, dir, "remote", "add", "origin", "https://example.invalid/repo.git")
+
+	got := resolveRemoteRef(dir, "origin/release/2026-05-07")
+	if got != "origin/release/2026-05-07" {
+		t.Fatalf("resolveRemoteRef: got %q, want origin/release/2026-05-07", got)
+	}
+}
+
+func initGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	runGit(t, dir, "init", "-b", "main")
+	runGit(t, dir, "config", "user.email", "test@example.invalid")
+	runGit(t, dir, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("test\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	runGit(t, dir, "add", "README.md")
+	runGit(t, dir, "commit", "-m", "initial")
+	return dir
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
 

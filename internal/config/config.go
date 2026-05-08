@@ -126,6 +126,8 @@ func (c *LLMConfig) ProviderKind() string {
 		return "cli"
 	case "gemini-cli":
 		return "cli"
+	case "codex-cli":
+		return "cli"
 	default:
 		return "api"
 	}
