@@ -48,7 +48,11 @@ func NewProvider(cfg config.LLMConfig) (Provider, error) {
 	case "gemini-cli":
 		return NewGeminiCLIWithModel(cfg.Model), nil
 	case "codex-cli":
-		return NewCodexCLIWithModel(cfg.Model), nil
+		provider := NewCodexCLIWithModel(cfg.Model)
+		if err := provider.ValidateConfig(); err != nil {
+			return nil, err
+		}
+		return provider, nil
 	default:
 		return NewLangChainProvider(cfg)
 	}
