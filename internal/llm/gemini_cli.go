@@ -13,7 +13,8 @@ import (
 
 // GeminiCLI shells out to `gemini` for LLM calls without API keys.
 type GeminiCLI struct {
-	model string
+	model   string
+	timeout time.Duration
 }
 
 func NewGeminiCLI() *GeminiCLI { return &GeminiCLI{} }
@@ -37,7 +38,14 @@ func (g *GeminiCLI) Complete(ctx context.Context, msgs []Message, opts Completio
 		args = append(args, "-m", g.model)
 	}
 
-	glog.L().Debug("gemini-cli call", "model", g.model, "stdinLen", len(combined))
+	timeout := callTimeout(opts, g.timeout)
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	glog.L().Debug("gemini-cli call", "model", g.model, "stdinLen", len(combined), "timeout", timeout)
 	start := time.Now()
 
 	cmd := exec.CommandContext(ctx, "gemini", args...)
@@ -46,8 +54,13 @@ func (g *GeminiCLI) Complete(ctx context.Context, msgs []Message, opts Completio
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	cmd.WaitDelay = 10 * time.Second
 
 	if err := cmd.Run(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			glog.L().Error("gemini-cli timeout", "elapsed", time.Since(start), "err", ctxErr)
+			return "", fmt.Errorf("gemini cli: %w after %s", ctxErr, time.Since(start).Round(time.Second))
+		}
 		glog.L().Error("gemini-cli error", "err", err, "stderr", stderr.String())
 		return "", fmt.Errorf("gemini cli: %w: %s", err, stderr.String())
 	}

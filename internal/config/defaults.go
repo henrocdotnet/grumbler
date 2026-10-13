@@ -4,14 +4,21 @@ package config
 func Defaults() *Config {
 	return &Config{
 		LLM: LLMConfig{
-			Provider:  "claude-cli",
-			Model:     "claude-sonnet-4-6",
-			MaxTokens: 16384,
+			Provider:    "claude-cli",
+			Model:       "claude-sonnet-4-6",
+			MaxTokens:   16384,
+			Sandbox:     "read-only",
+			CallTimeout: "5m",
 		},
 		Review: ReviewConfig{
-			BaseBranch:  "main",
-			Concurrency: 5,
-			Mode:        "diff",
+			BaseBranch:           "main",
+			Concurrency:          10,
+			Mode:                 "diff",
+			IncludeFileContent:   true,
+			MaxFileContentTokens: 4000,
+			MaxBatchTokens:       10000,
+			DiffContextLines:     15,
+			Timeout:              "30m",
 			IgnorePaths: []string{
 				"yarn.lock",
 				"package-lock.json",
@@ -25,9 +32,11 @@ func Defaults() *Config {
 			},
 		},
 		Passes: PassesConfig{
-			ReviewTeam: true,
-			Audit:      true,
-			CrossFile:  true,
+			ReviewTeam:       true,
+			Audit:            true,
+			CrossFile:        true,
+			MaxContextTokens: 80000,
+			OnOverflow:       "truncate",
 		},
 		Filter: FilterConfig{
 			MinSeverity:    "low",
@@ -54,7 +63,14 @@ llm:
 
   # Option C: Codex CLI (no API key needed — uses existing CLI auth)
   # provider: codex-cli
-  # model: gpt-5.5
+  # model: gpt-6.1-sol           # see 'codex debug models' for the live list
+  #   gpt-6.1-sol    latest workhorse (codex default)
+  #   gpt-6-astra    frontier; most capable, slowest
+  #   gpt-6-sol      previous-gen workhorse
+  #   gpt-6-luna     fast, cheap; no 'ultra' effort
+  #   gpt-5.6-sol    older workhorse
+  #   gpt-5.6-terra  older balanced
+  #   gpt-5.6-luna   older fast; no 'ultra' effort
 
   # Option D: API via langchaingo (requires API key)
   # provider: anthropic          # anthropic|openai|google|...
@@ -62,10 +78,29 @@ llm:
   # apiKey: ${ANTHROPIC_API_KEY} # env var expansion supported
   # maxTokens: 16384
 
+  # Speed / behaviour knobs (codex-cli)
+  # reasoningEffort: low         # low|medium|high|xhigh|max|ultra ('ultra' unsupported on luna)
+  #                              # NOTE: 'minimal' returns an empty final message
+  #                              # on some models — measure before adopting it.
+  sandbox: read-only             # read-only|workspace-write|danger-full-access
+  callTimeout: 5m                # bounds a single provider call; 0 = none
+
 review:
   baseBranch: main
-  concurrency: 5
+  concurrency: 10                # parallel inspect batches and audit calls
   mode: diff                     # diff (single-call) or file (per-file)
+  timeout: 30m                   # bounds the whole run; 0 = none
+
+  # Embed each changed file's full content alongside its diff. Measured on a
+  # 143-file branch: 2.1x the prompt tokens, but FASTER end to end and markedly
+  # better detection, because per-call reasoning time drops when the model can
+  # read instead of infer. Set false only if you are token-cost constrained.
+  includeFileContent: true
+  maxFileContentTokens: 4000     # per-file cap when includeFileContent is on; 0 = unlimited
+  maxBatchTokens: 10000          # token budget for one inspect batch
+                                 # smaller batches detect more; raise only to cut cost
+  diffContextLines: 15           # git diff --unified=N
+
   ignorePaths:
     - "yarn.lock"
     - "package-lock.json"
@@ -80,6 +115,11 @@ passes:
   reviewTeam: true
   audit: true
   crossFile: true
+  # The reviewTeam and crossFile passes send the whole diff in one call. Without
+  # a cap they overflow the model's context window on a large branch and return
+  # nothing.
+  maxContextTokens: 80000
+  onOverflow: truncate           # truncate|skip
 
 filter:
   minSeverity: low
@@ -106,7 +146,14 @@ llm:
 
   # Option C: Codex CLI (no API key needed — uses existing CLI auth)
   # provider: codex-cli
-  # model: gpt-5.5
+  # model: gpt-6.1-sol           # see 'codex debug models' for the live list
+  #   gpt-6.1-sol    latest workhorse (codex default)
+  #   gpt-6-astra    frontier; most capable, slowest
+  #   gpt-6-sol      previous-gen workhorse
+  #   gpt-6-luna     fast, cheap; no 'ultra' effort
+  #   gpt-5.6-sol    older workhorse
+  #   gpt-5.6-terra  older balanced
+  #   gpt-5.6-luna   older fast; no 'ultra' effort
 
   # Option D: API via langchaingo (requires API key)
   # provider: anthropic          # anthropic|openai|google|...
@@ -115,9 +162,22 @@ llm:
   # maxTokens: 16384
   # baseUrl:                     # custom endpoint (corp proxy, local LLM)
 
+  # Speed / behaviour knobs (codex-cli)
+  # reasoningEffort: low         # low|medium|high|xhigh|max|ultra ('ultra' unsupported on luna)
+  #                              # NOTE: 'minimal' returns an empty final message
+  #                              # on some models — measure before adopting it.
+  sandbox: read-only             # read-only|workspace-write|danger-full-access
+  callTimeout: 5m                # bounds a single provider call; 0 = none
+
 review:
-  concurrency: 5
+  concurrency: 10                # parallel inspect batches and audit calls
   mode: diff                     # diff (single-call) or file (per-file)
+  timeout: 30m                   # bounds the whole run; 0 = none
+  includeFileContent: true       # embed full file content alongside diffs (more tokens, better + faster)
+  maxFileContentTokens: 4000     # per-file cap when includeFileContent is on; 0 = unlimited
+  maxBatchTokens: 10000          # token budget for one inspect batch
+                                 # smaller batches detect more; raise only to cut cost
+  diffContextLines: 15           # git diff --unified=N
 
 filter:
   minSeverity: low

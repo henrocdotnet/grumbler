@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -29,55 +30,81 @@ func ExtractJSON(s string) string {
 	}
 
 	// Try extracting from code fences
-	matches := jsonFenceRe.FindStringSubmatch(s)
-	if len(matches) > 1 {
-		candidate := strings.TrimSpace(matches[1])
-		if json.Valid([]byte(candidate)) {
-			glog.L().Debug("ExtractJSON strategy=code_fence", "resultLen", len(candidate))
-			return candidate
-		}
+	if candidate, ok := extractFenced(s); ok {
+		glog.L().Debug("ExtractJSON strategy=code_fence", "resultLen", len(candidate))
+		return candidate
 	}
 
 	// Try to find JSON object/array boundaries
-	if start := strings.IndexAny(s, "{["); start >= 0 {
-		open := s[start]
-		var close byte = '}'
-		if open == '[' {
-			close = ']'
-		}
-		depth := 0
-		inString := false
-		for i := start; i < len(s); i++ {
-			ch := s[i]
-			if inString {
-				if ch == '\\' {
-					i++ // skip escaped char
-				} else if ch == '"' {
-					inString = false
-				}
-				continue
-			}
-			switch ch {
-			case '"':
-				inString = true
-			case open:
-				depth++
-			case close:
-				depth--
-				if depth == 0 {
-					candidate := s[start : i+1]
-					if json.Valid([]byte(candidate)) {
-						glog.L().Debug("ExtractJSON strategy=boundary_scan", "resultLen", len(candidate))
-						return candidate
-					}
-					glog.L().Debug("ExtractJSON boundary_scan candidate invalid", "candidateLen", len(candidate))
-				}
-			}
-		}
+	if candidate, ok := scanJSONBoundary(s); ok {
+		glog.L().Debug("ExtractJSON strategy=boundary_scan", "resultLen", len(candidate))
+		return candidate
 	}
 
 	glog.L().Debug("ExtractJSON strategy=passthrough", "resultLen", len(s))
 	return s
+}
+
+// extractFenced returns the first code-fenced block if it is valid JSON.
+func extractFenced(s string) (string, bool) {
+	matches := jsonFenceRe.FindStringSubmatch(s)
+	if len(matches) < 2 {
+		return "", false
+	}
+	candidate := strings.TrimSpace(matches[1])
+	return candidate, json.Valid([]byte(candidate))
+}
+
+// scanJSONBoundary finds the first '{' or '[' and returns the shortest
+// balanced, valid JSON value starting there, skipping brackets inside strings.
+func scanJSONBoundary(s string) (string, bool) {
+	start := strings.IndexAny(s, "{[")
+	if start < 0 {
+		return "", false
+	}
+	opener := s[start]
+	var closer byte = '}'
+	if opener == '[' {
+		closer = ']'
+	}
+	for end := balancedEnd(s, start, opener, closer); end >= 0; end = balancedEnd(s, end+1, opener, closer) {
+		candidate := s[start : end+1]
+		if json.Valid([]byte(candidate)) {
+			return candidate, true
+		}
+		glog.L().Debug("ExtractJSON boundary_scan candidate invalid", "candidateLen", len(candidate))
+	}
+	return "", false
+}
+
+// balancedEnd scans s from i and returns the index where opener/closer depth
+// returns to zero, ignoring brackets inside strings, or -1.
+func balancedEnd(s string, i int, opener, closer byte) int {
+	depth := 0
+	inString := false
+	for ; i < len(s); i++ {
+		ch := s[i]
+		if inString {
+			if ch == '\\' {
+				i++ // skip escaped char
+			} else if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case opener:
+			depth++
+		case closer:
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // StripCodeFences removes any wrapping markdown code fences.
@@ -96,6 +123,10 @@ func StripCodeFences(s string) string {
 	return s
 }
 
+// errEmptyResponse marks a successful call that returned no content, so the
+// final error is never a nil-wrapped %!w(<nil>).
+var errEmptyResponse = errors.New("empty response from LLM")
+
 // Retry retries a completion call up to n times on failure.
 func Retry(ctx context.Context, n int, p Provider, msgs []Message, opts CompletionOpts) (string, error) {
 	var lastErr error
@@ -109,6 +140,7 @@ func Retry(ctx context.Context, n int, p Provider, msgs []Message, opts Completi
 		}
 		if err == nil {
 			glog.L().Warn("empty response from LLM", "attempt", i+1)
+			err = errEmptyResponse
 		}
 		lastErr = err
 		if i < n-1 {

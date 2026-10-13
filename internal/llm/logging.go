@@ -16,15 +16,15 @@ const StageKey contextKey = "stage"
 
 // Exchange records a single LLM call: prompts sent, response received, timing.
 type Exchange struct {
-	Stage            string        `json:"stage"`
-	Messages         []Message     `json:"messages"`
-	Response         string        `json:"response"`
-	Duration         time.Duration `json:"duration_ms"`
-	Error            string        `json:"error,omitempty"`
-	PromptTokens        int           `json:"promptTokens"`
-	CompletionTokens    int           `json:"completionTokens"`
-	CacheCreationTokens int           `json:"cacheCreationTokens,omitempty"`
-	CacheReadTokens     int           `json:"cacheReadTokens,omitempty"`
+	Stage               string    `json:"stage"`
+	Messages            []Message `json:"messages"`
+	Response            string    `json:"response"`
+	DurationMS          int64     `json:"duration_ms"`
+	Error               string    `json:"error,omitempty"`
+	PromptTokens        int       `json:"promptTokens"`
+	CompletionTokens    int       `json:"completionTokens"`
+	CacheCreationTokens int       `json:"cacheCreationTokens,omitempty"`
+	CacheReadTokens     int       `json:"cacheReadTokens,omitempty"`
 }
 
 // countTokens returns the total token count for a set of messages using cl100k_base.
@@ -78,7 +78,7 @@ func (lp *LoggingProvider) Complete(ctx context.Context, msgs []Message, opts Co
 		Stage:               stage,
 		Messages:            msgs,
 		Response:            resp,
-		Duration:            time.Since(start),
+		DurationMS:          time.Since(start).Milliseconds(),
 		PromptTokens:        promptToks,
 		CompletionTokens:    completionToks,
 		CacheCreationTokens: cacheCreation,

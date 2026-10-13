@@ -10,13 +10,15 @@ import (
 	"github.com/henrocdotnet/grumbler/internal/config"
 )
 
-func TestCodexCLIArgsWithoutModel(t *testing.T) {
-	got := codexCLIArgs("")
+func TestCodexCLIArgsDefaults(t *testing.T) {
+	got := codexCLIArgs("", "", "", "")
 	want := []string{
 		"--ask-for-approval", "never",
 		"exec",
 		"--ignore-user-config",
-		"--sandbox", "workspace-write",
+		"--sandbox", "read-only",
+		"--ephemeral",
+		"--skip-git-repo-check",
 		"--disable", "shell_snapshot",
 		"--disable", "workspace_dependencies",
 		"-c", "include_permissions_instructions=false",
@@ -32,24 +34,62 @@ func TestCodexCLIArgsWithoutModel(t *testing.T) {
 }
 
 func TestCodexCLIArgsWithModel(t *testing.T) {
-	got := codexCLIArgs("gpt-5.5")
+	got := codexCLIArgs("model-string", "", "", "")
 	want := []string{
 		"--ask-for-approval", "never",
 		"exec",
 		"--ignore-user-config",
-		"--sandbox", "workspace-write",
+		"--sandbox", "read-only",
+		"--ephemeral",
+		"--skip-git-repo-check",
 		"--disable", "shell_snapshot",
 		"--disable", "workspace_dependencies",
 		"-c", "include_permissions_instructions=false",
 		"-c", "include_environment_context=false",
 		"-c", "skills.bundled.enabled=false",
 		"--color", "never",
-		"--model", "gpt-5.5",
+		"--model", "model-string",
 		"-",
 	}
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args:\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestCodexCLIArgsWithEffortAndSandbox(t *testing.T) {
+	got := codexCLIArgs("model-string", "low", "workspace-write", "/tmp/last.txt")
+	want := []string{
+		"--ask-for-approval", "never",
+		"exec",
+		"--ignore-user-config",
+		"--sandbox", "workspace-write",
+		"--ephemeral",
+		"--skip-git-repo-check",
+		"--disable", "shell_snapshot",
+		"--disable", "workspace_dependencies",
+		"-c", "include_permissions_instructions=false",
+		"-c", "include_environment_context=false",
+		"-c", "skills.bundled.enabled=false",
+		"--color", "never",
+		"--output-last-message", "/tmp/last.txt",
+		"-c", "model_reasoning_effort=low",
+		"--model", "model-string",
+		"-",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("args:\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+// --ignore-user-config discards ~/.codex/config.toml, so effort must be passed
+// explicitly or the model silently uses its built-in default.
+func TestCodexCLIArgsOmitsEffortWhenUnset(t *testing.T) {
+	for _, a := range codexCLIArgs("m", "", "", "") {
+		if strings.Contains(a, "model_reasoning_effort") {
+			t.Fatalf("effort should be omitted when unset, got %q", a)
+		}
 	}
 }
 
@@ -188,7 +228,7 @@ func TestNewProviderCodexCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p, err := NewProvider(config.LLMConfig{Provider: "codex-cli", Model: "gpt-5.5"})
+	p, err := NewProvider(config.LLMConfig{Provider: "codex-cli", Model: "model-string"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,8 +237,8 @@ func TestNewProviderCodexCLI(t *testing.T) {
 	if !ok {
 		t.Fatalf("provider type: got %T, want *CodexCLI", p)
 	}
-	if codex.model != "gpt-5.5" {
-		t.Fatalf("model: got %q, want gpt-5.5", codex.model)
+	if codex.model != "model-string" {
+		t.Fatalf("model: got %q, want model-string", codex.model)
 	}
 	if p.Name() != "codex-cli" {
 		t.Fatalf("name: got %q, want codex-cli", p.Name())

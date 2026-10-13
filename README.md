@@ -65,9 +65,16 @@ grumbler review -f sarif
 |------|-------------|
 | `--base <branch>` | Review commits on current branch vs base |
 | `--all` | Include staged + unstaged changes |
-| `--fast` | Diff-only mode (skip full file content) |
-| `--concurrency <n>` | Max concurrent file reviews |
+| `--fast` | Diff-only mode (force full file content off) |
+| `--include-file-content` | Embed each changed file's full content alongside its diff (slower, deeper) |
+| `--concurrency <n>` | Max concurrent inspect batches and audit calls |
+| `--reasoning <effort>` | Reasoning effort for `codex-cli` (`low`…`ultra`; `minimal` can return empty responses) |
+| `--max-batch-tokens <n>` | Token budget per inspect batch |
+| `--max-file-tokens <n>` | Per-file cap on embedded content (`0` = unlimited) |
+| `--timeout <dur>` | Overall review timeout (e.g. `30m`; `0` = none) |
 | `--min-severity <level>` | Filter output (`low`, `medium`, `high`, `critical`) |
+| `--no-rules` | Skip the compliance pass |
+| `--publish` | Repo-relative links in markdown (for PR comments) |
 
 ## LLM Providers
 
@@ -85,19 +92,43 @@ CLI providers shell out to `claude -p`, `gemini -p`, or `codex exec` — zero AP
 ## Review Pipeline
 
 ```
-Prepare → ReviewFiles → ClassifyRules → Safeguard → CrossFile → Aggregate
+Prepare → Inspect → Compliance → CrossFile → Audit → Aggregate
 ```
 
-| Stage | What it does |
-|-------|-------------|
-| **Prepare** | Compute diff, filter ignored files, read file content, annotate patches |
-| **ReviewFiles** | Mental simulation review per file (concurrent, bounded by `--concurrency`) |
-| **ClassifyRules** | 3-expert panel (Alice/Bob/Charles) checks rule violations |
-| **Safeguard** | 5-expert panel (Edward/Alice/Bob/Charles/Diana) validates suggestions |
-| **CrossFile** | Cross-file contract/dependency analysis |
-| **Aggregate** | Deduplicate, filter by severity, sort, cap |
+| Stage | What it does | LLM calls |
+|-------|-------------|-----------|
+| **Prepare** | Compute diff, filter ignored files, read file content, annotate patches | 0 |
+| **Inspect** | Primary defect detection over token-bounded batches (concurrent, bounded by `--concurrency`) | 1 per batch |
+| **Compliance** | Rule-violation panel over the combined diff | 1 |
+| **CrossFile** | Cross-file contract/dependency analysis | 1 |
+| **Audit** | Validation panel that keeps, revises, or rejects each suggestion (concurrent) | 1 per file with findings |
+| **Aggregate** | Deduplicate, filter by severity, sort, cap | 0 |
 
-Stages are conditionally skipped based on config (`passes.expertPanel`, `passes.safeguard`, `passes.crossFile`).
+CrossFile runs before Audit so its findings are validated like any other.
+
+Stages are conditionally skipped based on config (`passes.reviewTeam`,
+`passes.audit`, `passes.crossFile`).
+
+### Performance
+
+`Inspect` dominates a run. Three settings control its cost:
+
+- **`review.concurrency`** — batches run in parallel up to this limit.
+- **`review.includeFileContent`** (default `true`) — embedding each changed
+  file's full content alongside its diff costs 2.1× the prompt tokens but is
+  *faster* end to end and detects substantially more, because per-call reasoning
+  time drops when the model can read instead of infer. Turn it on unless you are
+  Set it false only if you are token-cost constrained; `review.diffContextLines`
+  (default 15) is then the cheaper partial substitute.
+- **`review.maxBatchTokens`** (default 10000) — the most important quality
+  setting. Detection collapses as the reviewed diff grows: on a 143-file branch,
+  6 batches of ~50k tokens found 9 issues while 40 batches of ~10k found 30,
+  including two critical command injections the large-batch run missed. Raise it
+  only to cut cost, and expect to lose findings.
+
+`passes.maxContextTokens` bounds the whole-diff prompts built by Compliance and
+CrossFile; without it they overflow the model's context window on a large
+branch and return nothing.
 
 ## Configuration
 
@@ -119,8 +150,15 @@ Put LLM credentials and personal preferences here:
 llm:
   provider: claude-cli
   model: claude-sonnet-4-6
+  sandbox: read-only       # codex-cli sandbox policy
+  callTimeout: 5m          # bounds a single provider call
+  # reasoningEffort: low   # codex-cli: minimal|low|medium|high|xhigh|max|ultra
 review:
-  concurrency: 5
+  concurrency: 10
+  timeout: 30m
+  includeFileContent: true
+  maxBatchTokens: 10000
+  diffContextLines: 15
 filter:
   minSeverity: low
 output:
@@ -144,9 +182,11 @@ review:
   baseBranch: develop
   ignorePaths: ["yarn.lock", "**/*.min.js", "vendor/**"]
 passes:
-  expertPanel: true
-  safeguard: true
+  reviewTeam: true
+  audit: true
   crossFile: true
+  maxContextTokens: 80000     # caps the whole-diff Compliance/CrossFile prompts
+  onOverflow: truncate        # truncate|skip when the diff exceeds that budget
 ```
 
 Fields not set in project config inherit from global, which inherits from defaults.

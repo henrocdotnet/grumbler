@@ -14,8 +14,14 @@ func TestDefaults(t *testing.T) {
 	if cfg.Review.BaseBranch != "main" {
 		t.Errorf("default base branch: got %q, want main", cfg.Review.BaseBranch)
 	}
-	if cfg.Review.Concurrency != 5 {
-		t.Errorf("default concurrency: got %d, want 5", cfg.Review.Concurrency)
+	if cfg.Review.Concurrency != 10 {
+		t.Errorf("default concurrency: got %d, want 10", cfg.Review.Concurrency)
+	}
+	if cfg.Review.MaxBatchTokens != 10000 {
+		t.Errorf("default maxBatchTokens: got %d, want 10000", cfg.Review.MaxBatchTokens)
+	}
+	if !cfg.Review.IncludeFileContent {
+		t.Error("includeFileContent should default to true")
 	}
 }
 
@@ -101,8 +107,8 @@ review:
 		t.Errorf("baseBranch: got %q, want develop", cfg.Review.BaseBranch)
 	}
 	// Concurrency from defaults (neither layer set it)
-	if cfg.Review.Concurrency != 5 {
-		t.Errorf("concurrency: got %d, want 5 (from defaults)", cfg.Review.Concurrency)
+	if cfg.Review.Concurrency != 10 {
+		t.Errorf("concurrency: got %d, want 10 (from defaults)", cfg.Review.Concurrency)
 	}
 }
 

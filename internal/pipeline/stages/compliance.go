@@ -7,8 +7,10 @@ import (
 
 	"github.com/henrocdotnet/grumbler/internal/llm"
 	glog "github.com/henrocdotnet/grumbler/internal/log"
+	"github.com/henrocdotnet/grumbler/internal/model"
 	"github.com/henrocdotnet/grumbler/internal/pipeline"
 	"github.com/henrocdotnet/grumbler/internal/prompt"
+	"github.com/henrocdotnet/grumbler/internal/rules"
 )
 
 // Compliance runs the Spock/McCoy/Scotty review team to identify rule violations.
@@ -28,10 +30,20 @@ func (Compliance) Execute(ctx context.Context, rc *pipeline.ReviewContext) error
 		return fmt.Errorf("rendering review team system prompt: %w", err)
 	}
 
-	// Build combined diff for all files
-	var combinedDiff string
-	for _, f := range rc.Files {
-		combinedDiff += fmt.Sprintf("--- File: %s ---\n%s\n\n", f.Path, f.Patch)
+	// Build combined diff for all files, bounded so the prompt cannot exceed
+	// the model's context window on a large branch.
+	budget := contextBudget(rc.Config.Passes.MaxContextTokens)
+	combinedDiff, shown, total := budgetedDiff(rc.Files, budget, func(f model.FileChange) string {
+		return fmt.Sprintf("--- File: %s ---\n%s\n\n", f.Path, f.Patch)
+	})
+	if shown < total {
+		if rc.Config.Passes.OnOverflow == "skip" {
+			glog.L().Warn("compliance skipped: diff exceeds context budget",
+				"budget", budget, "files", total)
+			return nil
+		}
+		glog.L().Warn("compliance diff truncated to fit context budget",
+			"budget", budget, "shown", shown, "total", total)
 	}
 
 	rulesJSON, err := json.Marshal(rc.Rules)
@@ -62,21 +74,27 @@ func (Compliance) Execute(ctx context.Context, rc *pipeline.ReviewContext) error
 	violated := parseReviewTeamResponse(resp)
 	glog.L().Debug("compliance violations", "count", len(violated))
 
-	// Tag existing suggestions with violated rule IDs
+	tagViolations(rc, violated)
+	return nil
+}
+
+// tagViolations tags existing suggestions with violated rule IDs.
+func tagViolations(rc *pipeline.ReviewContext, violated []reviewTeamViolation) {
 	violatedSet := make(map[string]bool, len(violated))
 	for _, v := range violated {
 		violatedSet[v.ID] = true
 	}
 
+	// Scope each violated rule to the files it actually governs. Without the
+	// glob check every suggestion is tagged with every violated rule, which
+	// makes RuleIDs meaningless on any repo with path-scoped rules.
 	for i := range rc.Suggestions {
-		for _, r := range rc.Rules {
+		for _, r := range rules.MatchRules(rc.Rules, rc.Suggestions[i].FilePath) {
 			if violatedSet[r.ID] {
 				rc.Suggestions[i].RuleIDs = append(rc.Suggestions[i].RuleIDs, r.ID)
 			}
 		}
 	}
-
-	return nil
 }
 
 type reviewTeamViolation struct {

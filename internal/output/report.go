@@ -102,6 +102,24 @@ func (rw *ReportWriter) YAML(result model.ReviewResult) error {
 func (rw *ReportWriter) Markdown(result model.ReviewResult, publish bool) error {
 	path := filepath.Join(rw.dir, "grumbler.report.md")
 
+	var b strings.Builder
+	writeMarkdownSummary(&b, result)
+	writeMarkdownFiles(&b, result.Suggestions, publish)
+	b.WriteString("</details>\n")
+
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		return fmt.Errorf("write markdown report: %w", err)
+	}
+	glog.L().Info("markdown report saved", "path", path)
+	return nil
+}
+
+// markdownSeverities orders severities in the markdown summary.
+var markdownSeverities = []string{"CRITICAL", "HIGH", "MEDIUM", "LOW"}
+
+// writeMarkdownSummary opens the outer <details> wrapper and writes the
+// severity summary and metrics table.
+func writeMarkdownSummary(b *strings.Builder, result model.ReviewResult) {
 	// Severity counts used in both the summary header and the table.
 	counts := map[string]int{}
 	for _, s := range result.Suggestions {
@@ -111,21 +129,20 @@ func (rw *ReportWriter) Markdown(result model.ReviewResult, publish bool) error 
 	nyc, _ := time.LoadLocation("America/New_York")
 	ts := time.Now().In(nyc).Format("2006/01/02 15:04:05 MST")
 
-	var b strings.Builder
 	// Outer <details> wrapper with severity summary.
 	b.WriteString("<details>\n<summary>\n")
 	b.WriteString(fmt.Sprintf("  <strong>Grumbler Report (%s)</strong><br>\n", ts))
-	for _, sev := range []string{"CRITICAL", "HIGH", "MEDIUM", "LOW"} {
+	for _, sev := range markdownSeverities {
 		b.WriteString(fmt.Sprintf("  %s: %d<br>\n", severityBadge(sev), counts[sev]))
 	}
 	b.WriteString("</summary>\n\n")
 
 	b.WriteString("# Grumbler Code Review Report\n\n")
-	b.WriteString(fmt.Sprintf("| Metric | Value |\n|--------|-------|\n"))
+	b.WriteString("| Metric | Value |\n|--------|-------|\n")
 
 	b.WriteString(fmt.Sprintf("| **Files reviewed** | %d |\n", result.FilesCount))
 	b.WriteString(fmt.Sprintf("| **Issues found** | %d |\n", len(result.Suggestions)))
-	for _, sev := range []string{"CRITICAL", "HIGH", "MEDIUM", "LOW"} {
+	for _, sev := range markdownSeverities {
 		if n := counts[sev]; n > 0 {
 			b.WriteString(fmt.Sprintf("| \u00a0\u00a0\u00a0%s | %d |\n", severityBadge(sev), n))
 		}
@@ -134,92 +151,84 @@ func (rw *ReportWriter) Markdown(result model.ReviewResult, publish bool) error 
 	if result.Model != "" {
 		b.WriteString(fmt.Sprintf("| **Model** | %s |\n", result.Model))
 	}
-	if result.TotalPromptTokens > 0 {
-		b.WriteString(fmt.Sprintf("| **Prompt tokens** | %d |\n", result.TotalPromptTokens))
-	}
-	if result.TotalCompletionTokens > 0 {
-		b.WriteString(fmt.Sprintf("| **Completion tokens** | %d |\n", result.TotalCompletionTokens))
-	}
-	if result.TotalCacheCreationTokens > 0 {
-		b.WriteString(fmt.Sprintf("| **Cache creation tokens** | %d |\n", result.TotalCacheCreationTokens))
-	}
-	if result.TotalCacheReadTokens > 0 {
-		b.WriteString(fmt.Sprintf("| **Cache read tokens** | %d |\n", result.TotalCacheReadTokens))
+	for _, row := range []struct {
+		label string
+		n     int
+	}{
+		{"Prompt tokens", result.TotalPromptTokens},
+		{"Completion tokens", result.TotalCompletionTokens},
+		{"Cache creation tokens", result.TotalCacheCreationTokens},
+		{"Cache read tokens", result.TotalCacheReadTokens},
+	} {
+		if row.n > 0 {
+			b.WriteString(fmt.Sprintf("| **%s** | %d |\n", row.label, row.n))
+		}
 	}
 	b.WriteString(fmt.Sprintf("| **Passes** | %s |\n", strings.Join(result.PassesRun, " → ")))
 	b.WriteString("\n---\n\n")
+}
 
-	// Group by file.
-	type fileGroup struct {
-		path        string
-		suggestions []model.CodeSuggestion
-	}
+// writeMarkdownFiles writes one section per file, in first-seen order.
+func writeMarkdownFiles(b *strings.Builder, suggestions []model.CodeSuggestion, publish bool) {
 	order := []string{}
-	grouped := map[string]*fileGroup{}
-	for _, s := range result.Suggestions {
+	grouped := map[string][]model.CodeSuggestion{}
+	for _, s := range suggestions {
 		fp := s.FilePath
 		if fp == "" {
 			fp = "(unknown)"
 		}
-		g, ok := grouped[fp]
-		if !ok {
-			g = &fileGroup{path: fp}
-			grouped[fp] = g
+		if _, ok := grouped[fp]; !ok {
 			order = append(order, fp)
 		}
-		g.suggestions = append(g.suggestions, s)
+		grouped[fp] = append(grouped[fp], s)
 	}
 
 	for i, fp := range order {
 		if i > 0 {
 			b.WriteString("<p align=\"center\">· · ·</p>\n\n")
 		}
-		g := grouped[fp]
 		if publish {
-			b.WriteString(fmt.Sprintf("## [%s](%s)\n\n", g.path, g.path))
+			b.WriteString(fmt.Sprintf("## [%s](%s)\n\n", fp, fp))
 		} else {
-			b.WriteString(fmt.Sprintf("## [%s](../../../%s)\n\n", g.path, g.path))
+			b.WriteString(fmt.Sprintf("## [%s](../../../%s)\n\n", fp, fp))
 		}
-		for _, s := range g.suggestions {
-			sev := strings.ToUpper(s.SeverityStr)
-			lang := s.Language
-			if lang == "" {
-				lang = langFromPath(fp)
-			}
-
-			b.WriteString("<details>\n")
-			b.WriteString(fmt.Sprintf("<summary>%s (%s) — %s</summary>\n\n",
-				severityBadge(sev), s.Category, suggestionTLDR(s)))
-
-			b.WriteString(fmt.Sprintf("**Lines %d–%d**\n\n", s.StartLine, s.EndLine))
-			b.WriteString(s.Description + "\n\n")
-
-			if s.Snippet != "" {
-				b.WriteString(fmt.Sprintf("**Current code:**\n```%s\n%s\n```\n\n", lang, strings.TrimRight(s.Snippet, "\n")))
-			}
-			if s.Proposal != "" {
-				b.WriteString(fmt.Sprintf("**Suggested fix:**\n```%s\n%s\n```\n\n", lang, strings.TrimRight(s.Proposal, "\n")))
-			}
-			if s.AuditResult != "" {
-				b.WriteString(fmt.Sprintf("*Audit result: %s*\n\n", s.AuditResult))
-			}
-
-			b.WriteString("**Changes:**\n")
-			b.WriteString("- [ ] Fixed\n")
-			b.WriteString("- [ ] Won't Fix\n")
-			b.WriteString("- Description:\n\n")
-
-			b.WriteString("</details>\n\n")
+		for _, s := range grouped[fp] {
+			writeMarkdownSuggestion(b, s, fp)
 		}
 	}
+}
 
-	b.WriteString("</details>\n")
-
-	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
-		return fmt.Errorf("write markdown report: %w", err)
+// writeMarkdownSuggestion writes one collapsible suggestion block.
+func writeMarkdownSuggestion(b *strings.Builder, s model.CodeSuggestion, fp string) {
+	sev := strings.ToUpper(s.SeverityStr)
+	lang := s.Language
+	if lang == "" {
+		lang = langFromPath(fp)
 	}
-	glog.L().Info("markdown report saved", "path", path)
-	return nil
+
+	b.WriteString("<details>\n")
+	b.WriteString(fmt.Sprintf("<summary>%s (%s) — %s</summary>\n\n",
+		severityBadge(sev), s.Category, suggestionTLDR(s)))
+
+	b.WriteString(fmt.Sprintf("**Lines %d–%d**\n\n", s.StartLine, s.EndLine))
+	b.WriteString(s.Description + "\n\n")
+
+	if s.Snippet != "" {
+		b.WriteString(fmt.Sprintf("**Current code:**\n```%s\n%s\n```\n\n", lang, strings.TrimRight(s.Snippet, "\n")))
+	}
+	if s.Proposal != "" {
+		b.WriteString(fmt.Sprintf("**Suggested fix:**\n```%s\n%s\n```\n\n", lang, strings.TrimRight(s.Proposal, "\n")))
+	}
+	if s.AuditResult != "" {
+		b.WriteString(fmt.Sprintf("*Audit result: %s*\n\n", s.AuditResult))
+	}
+
+	b.WriteString("**Changes:**\n")
+	b.WriteString("- [ ] Fixed\n")
+	b.WriteString("- [ ] Won't Fix\n")
+	b.WriteString("- Description:\n\n")
+
+	b.WriteString("</details>\n\n")
 }
 
 // maxPromptLines caps prompt rendering in the markdown conversation log.
@@ -249,7 +258,7 @@ func (rw *ReportWriter) Conversations(exchanges []llm.Exchange) error {
 			stage = "(unknown)"
 		}
 		callNum[stage]++
-		durSec := ex.Duration.Seconds()
+		durSec := float64(ex.DurationMS) / 1000
 		header := fmt.Sprintf("## %s (call %d) — %.1fs  [prompt: %d | completion: %d",
 			stage, callNum[stage], durSec, ex.PromptTokens, ex.CompletionTokens)
 		if ex.CacheCreationTokens > 0 || ex.CacheReadTokens > 0 {

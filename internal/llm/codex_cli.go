@@ -16,22 +16,57 @@ import (
 
 // CodexCLI shells out to `codex exec` for LLM calls without API keys.
 type CodexCLI struct {
-	model string
+	model   string
+	effort  string // model_reasoning_effort; "" = provider default
+	sandbox string // sandbox policy; "" = defaultCodexSandbox
+	timeout time.Duration
 }
+
+// defaultCodexSandbox is read-only: the prompt already embeds every diff and
+// file the model needs, so a writable workspace only buys agentic shell turns
+// that cost wall clock. See openspec add-codex-cli-support design Decision 4.
+const defaultCodexSandbox = "read-only"
 
 func NewCodexCLI() *CodexCLI { return &CodexCLI{} }
 
 func NewCodexCLIWithModel(model string) *CodexCLI { return &CodexCLI{model: model} }
 
+// NewCodexCLIWithOptions builds a provider with model, reasoning effort and
+// sandbox policy. Empty strings select the defaults.
+func NewCodexCLIWithOptions(model, effort, sandbox string) *CodexCLI {
+	return &CodexCLI{model: model, effort: effort, sandbox: sandbox}
+}
+
 func (c *CodexCLI) Complete(ctx context.Context, msgs []Message, opts CompletionOpts) (string, error) {
 	prompt := buildCodexPrompt(msgs)
-	args := codexCLIArgs(c.model)
 	env, err := codexCLIEnv()
 	if err != nil {
 		return "", err
 	}
 
-	glog.L().Debug("codex-cli call", "model", c.model, "stdinLen", len(prompt))
+	// Ask codex to write just the agent's final message to a file, so the
+	// result doesn't depend on scraping the full stdout transcript.
+	lastMsg, err := os.CreateTemp("", "grumbler-codex-*.txt")
+	if err != nil {
+		return "", fmt.Errorf("codex cli: creating output file: %w", err)
+	}
+	lastMsgPath := lastMsg.Name()
+	_ = lastMsg.Close()
+	defer func() { _ = os.Remove(lastMsgPath) }()
+
+	args := codexCLIArgs(c.model, c.effort, c.sandbox, lastMsgPath)
+
+	// Nothing else in this codebase bounds a provider call; without a deadline
+	// a wedged subprocess hangs the whole run forever.
+	timeout := callTimeout(opts, c.timeout)
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	glog.L().Debug("codex-cli call", "model", c.model, "effort", c.effort,
+		"sandbox", c.sandbox, "stdinLen", len(prompt), "timeout", timeout)
 	start := time.Now()
 
 	cmd := exec.CommandContext(ctx, "codex", args...)
@@ -41,13 +76,26 @@ func (c *CodexCLI) Complete(ctx context.Context, msgs []Message, opts Completion
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	// With a bytes.Buffer, exec uses an os.Pipe plus a copier goroutine, so a
+	// killed child that left a grandchild holding the pipe still hangs Run().
+	cmd.WaitDelay = 10 * time.Second
 
 	if err := cmd.Run(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			glog.L().Error("codex-cli timeout", "elapsed", time.Since(start), "err", ctxErr)
+			return "", fmt.Errorf("codex cli: %w after %s", ctxErr, time.Since(start).Round(time.Second))
+		}
 		glog.L().Error("codex-cli error", "err", err, "stderr", stderr.String())
 		return "", fmt.Errorf("codex cli: %w: %s", err, stderr.String())
 	}
 
 	result := strings.TrimSpace(stdout.String())
+	if data, rerr := os.ReadFile(lastMsgPath); rerr == nil {
+		if last := strings.TrimSpace(string(data)); last != "" {
+			result = last
+		}
+	}
+
 	glog.L().Debug("codex-cli done", "elapsed", time.Since(start), "stdoutLen", stdout.Len(), "stderrLen", stderr.Len(), "resultLen", len(result))
 	return result, nil
 }
@@ -59,18 +107,36 @@ func (c *CodexCLI) ValidateConfig() error {
 	return err
 }
 
-func codexCLIArgs(model string) []string {
+// codexCLIArgs builds the `codex` argument vector. Note the ordering: only
+// --ask-for-approval is a global flag; everything else is scoped to the `exec`
+// subcommand and must follow it.
+func codexCLIArgs(model, effort, sandbox, lastMessagePath string) []string {
+	if sandbox == "" {
+		sandbox = defaultCodexSandbox
+	}
 	args := []string{
 		"--ask-for-approval", "never",
 		"exec",
 		"--ignore-user-config",
-		"--sandbox", "workspace-write",
+		"--sandbox", sandbox,
+		// Every call is a fresh, self-contained completion; persisting session
+		// rollouts only grows the managed CODEX_HOME and slows each spawn.
+		"--ephemeral",
+		"--skip-git-repo-check",
 		"--disable", "shell_snapshot",
 		"--disable", "workspace_dependencies",
 		"-c", "include_permissions_instructions=false",
 		"-c", "include_environment_context=false",
 		"-c", "skills.bundled.enabled=false",
 		"--color", "never",
+	}
+	if lastMessagePath != "" {
+		args = append(args, "--output-last-message", lastMessagePath)
+	}
+	if effort != "" {
+		// --ignore-user-config discards the user's config.toml, so effort has
+		// to be passed explicitly or the model uses its built-in default.
+		args = append(args, "-c", "model_reasoning_effort="+effort)
 	}
 	if model != "" {
 		args = append(args, "--model", model)
@@ -101,6 +167,9 @@ func codexCLIHome() (string, error) {
 	return prepareManagedCodexHome(sourceHome)
 }
 
+// codexHomeDirName is the Codex home directory name under a parent dir.
+const codexHomeDirName = ".codex"
+
 func sourceCodexHome() (string, error) {
 	if codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME")); codexHome != "" {
 		return filepath.Abs(codexHome)
@@ -110,12 +179,12 @@ func sourceCodexHome() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("locating Codex home: %w", err)
 	}
-	return filepath.Join(home, ".codex"), nil
+	return filepath.Join(home, codexHomeDirName), nil
 }
 
 func prepareManagedCodexHome(sourceHome string) (string, error) {
-	managedHome := filepath.Join(config.GlobalDir(), ".codex")
-	if managedHome == ".codex" {
+	managedHome := filepath.Join(config.GlobalDir(), codexHomeDirName)
+	if managedHome == codexHomeDirName {
 		return "", fmt.Errorf("locating Grumbler Codex home: user config directory is unavailable")
 	}
 

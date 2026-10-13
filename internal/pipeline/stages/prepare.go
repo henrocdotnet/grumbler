@@ -23,7 +23,7 @@ func (Prepare) Execute(ctx context.Context, rc *pipeline.ReviewContext) error {
 		return filterAndEnrich(rc)
 	}
 
-	diff, err := git.GetDiff(rc.RepoDir, rc.Config.Review.BaseBranch, git.DiffMode(rc.DiffMode))
+	diff, err := git.GetDiff(rc.RepoDir, rc.Config.Review.BaseBranch, git.DiffMode(rc.DiffMode), rc.Config.Review.DiffContextLines)
 	if err != nil {
 		return fmt.Errorf("getting diff: %w", err)
 	}

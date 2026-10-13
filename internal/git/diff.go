@@ -19,19 +19,30 @@ const (
 	DiffBranch                 // git diff base...HEAD (branch commits)
 )
 
-// GetDiff returns a unified diff for the given mode.
-func GetDiff(dir, base string, mode DiffMode) (string, error) {
-	glog.L().Debug("GetDiff", "dir", dir, "base", base, "mode", mode)
+// DefaultContextLines is the diff context width used when none is configured.
+// It is wider than git's own default of 3: a wider window is the cheap way to
+// give the model surrounding-code context without embedding whole files.
+const DefaultContextLines = 15
+
+// GetDiff returns a unified diff for the given mode, with contextLines lines of
+// context around each hunk (<= 0 selects DefaultContextLines).
+func GetDiff(dir, base string, mode DiffMode, contextLines int) (string, error) {
+	if contextLines <= 0 {
+		contextLines = DefaultContextLines
+	}
+	glog.L().Debug("GetDiff", "dir", dir, "base", base, "mode", mode, "contextLines", contextLines)
+
+	unified := fmt.Sprintf("--unified=%d", contextLines)
 
 	var args []string
 	switch mode {
 	case DiffAll:
-		args = []string{"diff", "HEAD", "--unified=3"}
+		args = []string{"diff", "HEAD", unified}
 	case DiffBranch:
 		base = resolveRemoteRef(dir, base)
-		args = []string{"diff", base + "...HEAD", "--unified=3"}
+		args = []string{"diff", base + "...HEAD", unified}
 	default: // DiffStaged
-		args = []string{"diff", "--cached", "--unified=3"}
+		args = []string{"diff", "--cached", unified}
 	}
 
 	cmd := exec.Command("git", args...)
@@ -69,24 +80,7 @@ func parseOneFile(chunk string) model.FileChange {
 	fc := model.FileChange{}
 
 	for _, line := range lines {
-		switch {
-		case strings.HasPrefix(line, "diff --git "):
-			parts := strings.Fields(line)
-			if len(parts) >= 4 {
-				fc.Path = strings.TrimPrefix(parts[3], "b/")
-			}
-		case strings.HasPrefix(line, "new file"):
-			fc.Status = model.FileAdded
-		case strings.HasPrefix(line, "deleted file"):
-			fc.Status = model.FileDeleted
-		case strings.HasPrefix(line, "rename from "):
-			fc.OldPath = strings.TrimPrefix(line, "rename from ")
-			fc.Status = model.FileRenamed
-		case strings.HasPrefix(line, "--- a/"):
-			if fc.Status == "" {
-				fc.Status = model.FileModified
-			}
-		}
+		applyHeaderLine(&fc, line)
 	}
 
 	if fc.Status == "" {
@@ -95,18 +89,42 @@ func parseOneFile(chunk string) model.FileChange {
 
 	fc.Diff = chunk
 	fc.Language = model.LanguageFromPath(fc.Path)
-
-	// Count added/deleted lines
-	for _, line := range lines {
-		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-			fc.AddedLines++
-		}
-		if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-			fc.DeletedLines++
-		}
-	}
+	fc.AddedLines, fc.DeletedLines = countChangedLines(lines)
 
 	return fc
+}
+
+// applyHeaderLine updates path and status from one diff header line.
+func applyHeaderLine(fc *model.FileChange, line string) {
+	switch {
+	case strings.HasPrefix(line, "diff --git "):
+		parts := strings.Fields(line)
+		if len(parts) >= 4 {
+			fc.Path = strings.TrimPrefix(parts[3], "b/")
+		}
+	case strings.HasPrefix(line, "new file"):
+		fc.Status = model.FileAdded
+	case strings.HasPrefix(line, "deleted file"):
+		fc.Status = model.FileDeleted
+	case strings.HasPrefix(line, "rename from "):
+		fc.OldPath = strings.TrimPrefix(line, "rename from ")
+		fc.Status = model.FileRenamed
+	case strings.HasPrefix(line, "--- a/") && fc.Status == "":
+		fc.Status = model.FileModified
+	}
+}
+
+// countChangedLines counts added and deleted lines, excluding file headers.
+func countChangedLines(lines []string) (added, deleted int) {
+	for _, line := range lines {
+		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+			added++
+		}
+		if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
+			deleted++
+		}
+	}
+	return added, deleted
 }
 
 // resolveRemoteRef returns "origin/<ref>" if that remote ref exists,

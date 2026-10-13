@@ -14,7 +14,8 @@ import (
 
 // ClaudeCLI shells out to `claude -p` for LLM calls without API keys.
 type ClaudeCLI struct {
-	model string // optional; empty = CLI default
+	model   string // optional; empty = CLI default
+	timeout time.Duration
 
 	// last call usage (populated from JSON output)
 	lastUsage TokenUsage
@@ -64,7 +65,14 @@ func (c *ClaudeCLI) Complete(ctx context.Context, msgs []Message, opts Completio
 
 	args = append(args, "--output-format", "json")
 
-	glog.L().Debug("claude-cli call", "stdinLen", len(userPrompt))
+	timeout := callTimeout(opts, c.timeout)
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	glog.L().Debug("claude-cli call", "stdinLen", len(userPrompt), "timeout", timeout)
 	start := time.Now()
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
@@ -73,8 +81,13 @@ func (c *ClaudeCLI) Complete(ctx context.Context, msgs []Message, opts Completio
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	cmd.WaitDelay = 10 * time.Second
 
 	if err := cmd.Run(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			glog.L().Error("claude-cli timeout", "elapsed", time.Since(start), "err", ctxErr)
+			return "", fmt.Errorf("claude cli: %w after %s", ctxErr, time.Since(start).Round(time.Second))
+		}
 		glog.L().Error("claude-cli error", "err", err, "stderr", stderr.String())
 		return "", fmt.Errorf("claude cli: %w: %s", err, stderr.String())
 	}

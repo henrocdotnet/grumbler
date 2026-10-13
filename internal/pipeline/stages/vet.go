@@ -30,7 +30,7 @@ func (Audit) Execute(ctx context.Context, rc *pipeline.ReviewContext) error {
 	byFile := groupSuggestionsByFile(rc.Suggestions)
 
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(rc.Config.Review.Concurrency)
+	g.SetLimit(effectiveConcurrency(rc.Config.Review.Concurrency))
 
 	var mu sync.Mutex
 
@@ -90,11 +90,18 @@ func auditFile(ctx context.Context, rc *pipeline.ReviewContext, file model.FileC
 		llm.UserMsg(userPrompt),
 	}
 
+	// One retry loop, not two. This previously wrapped llm.Retry(ctx, 2, ...)
+	// in its own 2-iteration loop, costing up to 4 serial provider calls for a
+	// single file. A single loop that retries on transport *or* parse failure
+	// caps a file at auditAttempts calls.
+	const auditAttempts = 2
+
 	var lastErr error
-	for attempt := 0; attempt < 2; attempt++ {
-		resp, err := llm.Retry(ctx, 2, rc.Provider, msgs, llm.DefaultOpts())
+	for attempt := 0; attempt < auditAttempts; attempt++ {
+		resp, err := llm.Retry(ctx, 1, rc.Provider, msgs, llm.DefaultOpts())
 		if err != nil {
 			lastErr = err
+			glog.L().Warn("audit call retry", "path", file.Path, "attempt", attempt, "err", err)
 			continue
 		}
 		glog.L().Debug("audit response", "respLen", len(resp), "attempt", attempt)
@@ -167,23 +174,29 @@ func applyAuditVerdicts(rc *pipeline.ReviewContext, filePath string, verdicts []
 			continue
 		}
 
-		switch v.Verdict {
-		case "reject":
-			s.AuditResult = "discard"
-		case "revise":
-			s.AuditResult = "update"
-			if v.Proposal != "" {
-				s.Proposal = v.Proposal
-			}
-			if v.Description != "" {
-				s.Description = v.Description
-			}
-			if v.Synopsis != "" {
-				s.Synopsis = v.Synopsis
-			}
-		default:
-			s.AuditResult = "fix"
+		applyAuditVerdict(s, v)
+	}
+}
+
+// applyAuditVerdict records one verdict on a suggestion; "revise" also
+// replaces any non-empty revised fields.
+func applyAuditVerdict(s *model.CodeSuggestion, v *auditVerdict) {
+	switch v.Verdict {
+	case "reject":
+		s.AuditResult = "discard"
+	case "revise":
+		s.AuditResult = "update"
+		if v.Proposal != "" {
+			s.Proposal = v.Proposal
 		}
+		if v.Description != "" {
+			s.Description = v.Description
+		}
+		if v.Synopsis != "" {
+			s.Synopsis = v.Synopsis
+		}
+	default:
+		s.AuditResult = "fix"
 	}
 }
 

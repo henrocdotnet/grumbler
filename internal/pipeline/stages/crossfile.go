@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/henrocdotnet/grumbler/internal/llm"
 	glog "github.com/henrocdotnet/grumbler/internal/log"
@@ -24,10 +23,20 @@ func (CrossFile) Execute(ctx context.Context, rc *pipeline.ReviewContext) error 
 		return nil
 	}
 
-	// Build a combined view of all changes
-	var allDiffs strings.Builder
-	for _, f := range rc.Files {
-		fmt.Fprintf(&allDiffs, "=== %s (%s) ===\n%s\n\n", f.Path, f.Language, f.Patch)
+	// Build a combined view of all changes, bounded so the prompt cannot exceed
+	// the model's context window on a large branch.
+	budget := contextBudget(rc.Config.Passes.MaxContextTokens)
+	allDiffs, shown, total := budgetedDiff(rc.Files, budget, func(f model.FileChange) string {
+		return fmt.Sprintf("=== %s (%s) ===\n%s\n\n", f.Path, f.Language, f.Patch)
+	})
+	if shown < total {
+		if rc.Config.Passes.OnOverflow == "skip" {
+			glog.L().Warn("crossfile skipped: diff exceeds context budget",
+				"budget", budget, "files", total)
+			return nil
+		}
+		glog.L().Warn("crossfile diff truncated to fit context budget",
+			"budget", budget, "shown", shown, "total", total)
 	}
 
 	systemPrompt := `You are a cross-file analysis expert. Analyze the following multi-file diff for issues that span across files:
@@ -59,7 +68,7 @@ Return JSON:
 }` + "\n```"
 
 	userPrompt := fmt.Sprintf("## Cross-File Analysis\n\nAnalyze these %d changed files for cross-file issues:\n\n%s",
-		len(rc.Files), allDiffs.String())
+		shown, allDiffs)
 
 	msgs := []llm.Message{
 		llm.SystemMsg(systemPrompt),
@@ -116,8 +125,12 @@ func parseCrossFileResponse(raw string) ([]model.CodeSuggestion, error) {
 	}
 
 	var result []model.CodeSuggestion
-	for _, s := range resp.Suggestions {
+	for i, s := range resp.Suggestions {
 		result = append(result, model.CodeSuggestion{
+			// Audit matches verdicts by suggestion ID, so crossfile findings
+			// need one too or they pass through the audit pass unexamined.
+			// "xf:" keeps them distinct from inspect's "path:line:index" IDs.
+			ID:          fmt.Sprintf("xf:%s:%d:%d", s.FilePath, s.StartLine, i),
 			FilePath:    s.FilePath,
 			Language:    model.LanguageFromPath(s.FilePath),
 			Severity:    model.ParseSeverity(s.Severity),

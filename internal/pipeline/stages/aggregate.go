@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"sort"
+	"strconv"
 
 	glog "github.com/henrocdotnet/grumbler/internal/log"
 	"github.com/henrocdotnet/grumbler/internal/model"
@@ -31,7 +32,7 @@ func (Aggregate) Execute(_ context.Context, rc *pipeline.ReviewContext) error {
 	seen := map[string]bool{}
 	var deduped []model.CodeSuggestion
 	for _, s := range kept {
-		key := s.FilePath + ":" + s.Title + ":" + string(rune(s.StartLine))
+		key := s.FilePath + ":" + s.Title + ":" + strconv.Itoa(s.StartLine)
 		if seen[key] {
 			continue
 		}
@@ -51,7 +52,7 @@ func (Aggregate) Execute(_ context.Context, rc *pipeline.ReviewContext) error {
 	glog.L().Debug("aggregate after severity filter", "count", len(filtered))
 
 	// Sort: severity desc, then file path
-	sort.Slice(filtered, func(i, j int) bool {
+	sort.SliceStable(filtered, func(i, j int) bool {
 		if filtered[i].Severity != filtered[j].Severity {
 			return filtered[i].Severity < filtered[j].Severity // lower ordinal = higher severity
 		}

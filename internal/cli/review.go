@@ -13,11 +13,18 @@ import (
 	"github.com/henrocdotnet/grumbler/internal/git"
 	"github.com/henrocdotnet/grumbler/internal/llm"
 	glog "github.com/henrocdotnet/grumbler/internal/log"
+	"github.com/henrocdotnet/grumbler/internal/model"
 	"github.com/henrocdotnet/grumbler/internal/output"
 	"github.com/henrocdotnet/grumbler/internal/pipeline"
 	"github.com/henrocdotnet/grumbler/internal/pipeline/stages"
 	"github.com/henrocdotnet/grumbler/internal/prompt"
 	"github.com/henrocdotnet/grumbler/internal/rules"
+)
+
+// Flag names referenced in more than one place.
+const (
+	flagIncludeFileContent = "include-file-content"
+	flagMaxFileTokens      = "max-file-tokens"
 )
 
 func init() {
@@ -31,7 +38,12 @@ func init() {
 	reviewCmd.Flags().String("base", "", "Base branch for branch diff mode")
 	reviewCmd.Flags().Bool("all", false, "Include all uncommitted changes (staged + unstaged)")
 	reviewCmd.Flags().Bool("fast", false, "Diff-only mode (skip full file content)")
-	reviewCmd.Flags().Int("concurrency", 0, "Max concurrent file reviews")
+	reviewCmd.Flags().Bool(flagIncludeFileContent, false, "Embed each changed file's full content alongside its diff (slower, deeper)")
+	reviewCmd.Flags().String("reasoning", "", "Reasoning effort for codex-cli: minimal|low|medium|high|xhigh|max|ultra")
+	reviewCmd.Flags().Int("max-batch-tokens", 0, "Token budget per inspect batch (0 = config)")
+	reviewCmd.Flags().Int(flagMaxFileTokens, -1, "Cap per-file embedded content in tokens (0 = unlimited, -1 = config)")
+	reviewCmd.Flags().Duration("timeout", 0, "Overall review timeout (0 = config)")
+	reviewCmd.Flags().Int("concurrency", 0, "Max concurrent inspect batches and audit calls")
 	reviewCmd.Flags().String("min-severity", "", "Minimum severity filter")
 	reviewCmd.Flags().Bool("no-rules", false, "Skip compliance pass (ignore all rules)")
 	reviewCmd.Flags().Bool("publish", false, "Use repo-relative links in markdown (for PR comments)")
@@ -58,17 +70,10 @@ func runReview(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: init logging: %v\n", err)
 	}
 
-	// Load config
-	cfg, err := config.Load(repoRoot)
+	cfg, err := loadConfig(cmd, repoRoot)
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		return err
 	}
-	glog.L().Info("config loaded", "provider", cfg.LLM.Provider, "model", cfg.LLM.Model, "format", cfg.Output.Format)
-
-	// Apply flag overrides
-	overrides := buildOverrides(cmd)
-	overrides.Apply(cfg)
-	glog.L().Debug("overrides applied", "provider", cfg.LLM.Provider, "model", cfg.LLM.Model)
 
 	// Load prompt overrides
 	if err := prompt.LoadOverrides(repoRoot); err != nil {
@@ -83,26 +88,12 @@ func runReview(cmd *cobra.Command, _ []string) error {
 	lp := llm.NewLoggingProvider(provider)
 	glog.L().Info("provider created", "name", provider.Name())
 
-	// Load rules
-	rulesList, err := rules.LoadRules(repoRoot)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: loading rules: %v\n", err)
-	}
-	if noRules, _ := cmd.Flags().GetBool("no-rules"); noRules {
-		rulesList = nil
-	}
+	rulesList := loadRules(cmd, repoRoot)
 
-	all, _ := cmd.Flags().GetBool("all")
-	fast, _ := cmd.Flags().GetBool("fast")
-	baseBranch, _ := cmd.Flags().GetString("base")
+	fast := resolveFast(cmd, cfg)
+	glog.L().Debug("content mode", "fast", fast, "includeFileContent", !fast)
 
-	// Determine diff mode: --base → branch, --all → all, default → staged
-	diffMode := int(git.DiffStaged)
-	if baseBranch != "" {
-		diffMode = int(git.DiffBranch)
-	} else if all {
-		diffMode = int(git.DiffAll)
-	}
+	diffMode := resolveDiffMode(cmd)
 
 	// Build review context
 	rc := &pipeline.ReviewContext{
@@ -119,8 +110,8 @@ func runReview(cmd *cobra.Command, _ []string) error {
 		stages.Prepare{},
 		stages.Inspect{},
 		stages.Compliance{},
-		stages.Audit{},
 		stages.CrossFile{},
+		stages.Audit{},
 		stages.Aggregate{},
 	)
 
@@ -146,10 +137,7 @@ func runReview(cmd *cobra.Command, _ []string) error {
 
 	glog.L().Info("pipeline start", "stages", len(p.Stages()), "diffMode", diffMode)
 
-	// Execute
-	ctx := context.Background()
-	if err := p.Run(ctx, rc); err != nil {
-		glog.L().Error("pipeline failed", "err", err)
+	if err := runPipeline(p, rc, cfg.Review.TimeoutDuration()); err != nil {
 		return err
 	}
 
@@ -160,33 +148,18 @@ func runReview(cmd *cobra.Command, _ []string) error {
 
 	// Persist final report
 	exchanges := lp.Exchanges()
-	for _, ex := range exchanges {
-		result.TotalPromptTokens += ex.PromptTokens
-		result.TotalCompletionTokens += ex.CompletionTokens
-		result.TotalCacheCreationTokens += ex.CacheCreationTokens
-		result.TotalCacheReadTokens += ex.CacheReadTokens
-	}
-
+	addTokenTotals(&result, exchanges)
 	if rw != nil {
-		if err := rw.Final(result); err != nil {
-			glog.L().Error("final report failed", "err", err)
-		}
-		if err := rw.SARIF(result); err != nil {
-			glog.L().Error("sarif report failed", "err", err)
-		}
-		if err := rw.YAML(result); err != nil {
-			glog.L().Error("yaml report failed", "err", err)
-		}
-		if err := rw.Markdown(result, cfg.Output.Publish); err != nil {
-			glog.L().Error("markdown report failed", "err", err)
-		}
-		if err := rw.Conversations(exchanges); err != nil {
-			glog.L().Error("conversations report failed", "err", err)
-		}
-		fmt.Fprintf(os.Stderr, "Report saved to %s\n", rw.Dir())
+		writeReports(rw, result, exchanges, cfg.Output.Publish)
 	}
 
-	switch cfg.Output.Format {
+	return writeOutput(cfg.Output.Format, result, rc.Errors, start)
+}
+
+// writeOutput renders result to stdout in format. Terminal output also
+// reports elapsed time and non-fatal errors on stderr.
+func writeOutput(format string, result model.ReviewResult, errs []error, start time.Time) error {
+	switch format {
 	case "json":
 		return output.WriteJSON(os.Stdout, result)
 	case "yaml":
@@ -197,19 +170,123 @@ func runReview(cmd *cobra.Command, _ []string) error {
 		output.WriteTerminal(os.Stdout, result)
 	}
 
-	if cfg.Output.Format == "terminal" {
+	if format == "terminal" {
 		fmt.Fprintf(os.Stderr, "\nCompleted in %s\n", time.Since(start).Round(time.Millisecond))
+		printWarnings(errs)
 	}
+	return nil
+}
 
-	// Print non-fatal errors
-	if len(rc.Errors) > 0 && cfg.Output.Format == "terminal" {
-		fmt.Fprintf(os.Stderr, "\nWarnings:\n")
-		for _, e := range rc.Errors {
-			fmt.Fprintf(os.Stderr, "  - %v\n", e)
+// loadConfig loads the config cascade, applies flag overrides, and
+// re-validates: Load validated the file layers, flags can still be invalid.
+func loadConfig(cmd *cobra.Command, repoRoot string) (*config.Config, error) {
+	cfg, err := config.Load(repoRoot)
+	if err != nil {
+		return nil, fmt.Errorf("loading config: %w", err)
+	}
+	glog.L().Info("config loaded", "provider", cfg.LLM.Provider, "model", cfg.LLM.Model, "format", cfg.Output.Format)
+
+	buildOverrides(cmd).Apply(cfg)
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	glog.L().Debug("overrides applied", "provider", cfg.LLM.Provider, "model", cfg.LLM.Model)
+	return cfg, nil
+}
+
+// loadRules loads project rules; --no-rules discards them. Load failures
+// are warnings, not fatal.
+func loadRules(cmd *cobra.Command, repoRoot string) []rules.Rule {
+	rulesList, err := rules.LoadRules(repoRoot)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: loading rules: %v\n", err)
+	}
+	if noRules, _ := cmd.Flags().GetBool("no-rules"); noRules {
+		return nil
+	}
+	return rulesList
+}
+
+// runPipeline executes p, bounded by timeout when positive.
+func runPipeline(p *pipeline.Pipeline, rc *pipeline.ReviewContext, timeout time.Duration) error {
+	ctx := context.Background()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+		glog.L().Debug("run timeout armed", "timeout", timeout)
+	}
+	if err := p.Run(ctx, rc); err != nil {
+		glog.L().Error("pipeline failed", "err", err)
+		return err
+	}
+	return nil
+}
+
+// resolveFast decides diff-only mode. Full file content is opt-in
+// (review.includeFileContent); --fast forces it off, --include-file-content on.
+func resolveFast(cmd *cobra.Command, cfg *config.Config) bool {
+	fast := !cfg.Review.IncludeFileContent
+	if cmd.Flags().Changed(flagIncludeFileContent) {
+		v, _ := cmd.Flags().GetBool(flagIncludeFileContent)
+		fast = !v
+	}
+	if v, _ := cmd.Flags().GetBool("fast"); v {
+		fast = true
+	}
+	return fast
+}
+
+// resolveDiffMode maps flags to a diff mode: --base → branch, --all → all,
+// default → staged.
+func resolveDiffMode(cmd *cobra.Command) int {
+	if baseBranch, _ := cmd.Flags().GetString("base"); baseBranch != "" {
+		return int(git.DiffBranch)
+	}
+	if all, _ := cmd.Flags().GetBool("all"); all {
+		return int(git.DiffAll)
+	}
+	return int(git.DiffStaged)
+}
+
+func addTokenTotals(result *model.ReviewResult, exchanges []llm.Exchange) {
+	for _, ex := range exchanges {
+		result.TotalPromptTokens += ex.PromptTokens
+		result.TotalCompletionTokens += ex.CompletionTokens
+		result.TotalCacheCreationTokens += ex.CacheCreationTokens
+		result.TotalCacheReadTokens += ex.CacheReadTokens
+	}
+}
+
+// writeReports persists every report format. Failures are logged, not fatal.
+func writeReports(rw *output.ReportWriter, result model.ReviewResult, exchanges []llm.Exchange, publish bool) {
+	writes := []struct {
+		name string
+		fn   func() error
+	}{
+		{"final", func() error { return rw.Final(result) }},
+		{"sarif", func() error { return rw.SARIF(result) }},
+		{"yaml", func() error { return rw.YAML(result) }},
+		{"markdown", func() error { return rw.Markdown(result, publish) }},
+		{"conversations", func() error { return rw.Conversations(exchanges) }},
+	}
+	for _, w := range writes {
+		if err := w.fn(); err != nil {
+			glog.L().Error(w.name+" report failed", "err", err)
 		}
 	}
+	fmt.Fprintf(os.Stderr, "Report saved to %s\n", rw.Dir())
+}
 
-	return nil
+// printWarnings lists non-fatal pipeline errors.
+func printWarnings(errs []error) {
+	if len(errs) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "\nWarnings:\n")
+	for _, e := range errs {
+		fmt.Fprintf(os.Stderr, "  - %v\n", e)
+	}
 }
 
 func resolveDir(cmd *cobra.Command) (string, error) {
@@ -233,6 +310,22 @@ func buildOverrides(cmd *cobra.Command) *config.Overrides {
 	}
 	if v, _ := cmd.Flags().GetString("format"); v != "" {
 		o.Format = v
+	}
+	if v, _ := cmd.Flags().GetString("reasoning"); v != "" {
+		o.ReasoningEffort = v
+	}
+	if v, _ := cmd.Flags().GetInt("max-batch-tokens"); v > 0 {
+		o.MaxBatchTokens = v
+	}
+	if cmd.Flags().Changed(flagMaxFileTokens) {
+		v, _ := cmd.Flags().GetInt(flagMaxFileTokens)
+		if v >= 0 {
+			o.MaxFileContentTokens = &v
+		}
+	}
+	if cmd.Flags().Changed("timeout") {
+		v, _ := cmd.Flags().GetDuration("timeout")
+		o.Timeout = v.String()
 	}
 	if v, _ := cmd.Flags().GetInt("concurrency"); v > 0 {
 		o.Concurrency = v

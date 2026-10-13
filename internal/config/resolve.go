@@ -11,6 +11,11 @@ type Overrides struct {
 	MinSeverity string
 	MaxTokens   int
 	Publish     *bool // nil = not set by flag
+
+	ReasoningEffort      string
+	MaxBatchTokens       int
+	MaxFileContentTokens *int // nil = not set by flag (0 is meaningful: unlimited)
+	Timeout              string
 }
 
 // Apply merges non-zero overrides into cfg.
@@ -38,5 +43,17 @@ func (o *Overrides) Apply(cfg *Config) {
 	}
 	if o.Publish != nil {
 		cfg.Output.Publish = *o.Publish
+	}
+	if o.ReasoningEffort != "" {
+		cfg.LLM.ReasoningEffort = o.ReasoningEffort
+	}
+	if o.MaxBatchTokens > 0 {
+		cfg.Review.MaxBatchTokens = o.MaxBatchTokens
+	}
+	if o.MaxFileContentTokens != nil {
+		cfg.Review.MaxFileContentTokens = *o.MaxFileContentTokens
+	}
+	if o.Timeout != "" {
+		cfg.Review.Timeout = o.Timeout
 	}
 }

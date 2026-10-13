@@ -20,8 +20,16 @@ type Provider interface {
 - **langchaingo** (`langchain.go`): API-key-based, wraps `tmc/langchaingo` for Anthropic/OpenAI/Google/any OpenAI-compatible endpoint.
 - **claude-cli** (`claude_cli.go`): Shells out to `claude -p`, pipes prompt via stdin. Uses `--system-prompt` and `--output-format`.
 - **gemini-cli** (`gemini_cli.go`): Shells out to `gemini -p`, pipes via stdin.
+- **codex-cli** (`codex_cli.go`): Shells out to `codex exec`, pipes via stdin. Runs
+  `--ephemeral` with a `read-only` sandbox and reads the agent's final message via
+  `--output-last-message` rather than scraping stdout. Reasoning effort is passed
+  explicitly (`-c model_reasoning_effort=…`) because `--ignore-user-config`
+  discards the user's own `config.toml`.
 
-CLI providers trade ~2s process-spawn overhead for zero API key configuration.
+CLI providers trade a per-call process spawn for zero API key configuration.
+That spawn is a fixed cost of seconds regardless of prompt size, so call *count*
+drives runtime more than token volume — hence batching in `Inspect` and a
+per-call deadline (`llm.callTimeout`) on every CLI provider.
 
 ### Pipeline
 
@@ -34,9 +42,11 @@ type Stage interface {
 }
 ```
 
-`ReviewContext` is mutable shared state passed through stages. Stages append suggestions, record errors, and read config. File-level parallelism uses `errgroup` with configurable semaphore (default 5).
+`ReviewContext` is mutable shared state passed through stages. Stages append suggestions, record errors, and read config; `AddSuggestions` and `AddError` are mutex-guarded because stages fan out. Parallelism uses `errgroup` with a configurable semaphore (default 10) — over batches in `Inspect` and over files in `Audit`. Configured concurrency always goes through `effectiveConcurrency`, since `SetLimit(0)` blocks forever.
 
-Pipeline halts on first error. Individual file failures within a stage are non-fatal (recorded on `rc.Errors`).
+`Inspect` collects batch results into indexed slots and drains them in order after `Wait`, so output does not depend on which batch finishes first — `Aggregate` dedups first-wins and can truncate to `filter.maxSuggestions`.
+
+Pipeline halts on first error. Individual file failures within a stage are non-fatal (recorded on `rc.Errors`). The whole run is bounded by `review.timeout` and each provider call by `llm.callTimeout`.
 
 ### Diff Modes
 
@@ -46,7 +56,10 @@ Pipeline halts on first error. Individual file failures within a stage are non-f
 | All | `git diff HEAD` | `--all` flag |
 | Branch | `git diff base...HEAD` | `--base` flag |
 
-Staged-by-default avoids reviewing uncommitted work-in-progress.
+Staged-by-default avoids reviewing uncommitted work-in-progress. All modes use
+`--unified=<review.diffContextLines>` (default 15): a wider hunk window is the
+cheap way to give the model surrounding-code context, since full file content is
+opt-in (`review.includeFileContent`).
 
 ### Prompt System
 

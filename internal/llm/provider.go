@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/henrocdotnet/grumbler/internal/config"
 )
@@ -19,6 +20,9 @@ type CompletionOpts struct {
 	Temperature float64
 	MaxTokens   int
 	JSONMode    bool
+	// Timeout bounds a single call. 0 falls back to the provider's configured
+	// timeout (llm.callTimeout); 0 on both means no limit.
+	Timeout time.Duration
 }
 
 // Provider is the interface all LLM backends implement.
@@ -42,13 +46,20 @@ type TokenUsageProvider interface {
 
 // NewProvider constructs the appropriate provider from config.
 func NewProvider(cfg config.LLMConfig) (Provider, error) {
+	timeout := cfg.CallTimeoutDuration()
+
 	switch strings.ToLower(cfg.Provider) {
 	case "claude-cli":
-		return NewClaudeCLIWithModel(cfg.Model), nil
+		p := NewClaudeCLIWithModel(cfg.Model)
+		p.timeout = timeout
+		return p, nil
 	case "gemini-cli":
-		return NewGeminiCLIWithModel(cfg.Model), nil
+		p := NewGeminiCLIWithModel(cfg.Model)
+		p.timeout = timeout
+		return p, nil
 	case "codex-cli":
-		provider := NewCodexCLIWithModel(cfg.Model)
+		provider := NewCodexCLIWithOptions(cfg.Model, cfg.ReasoningEffort, cfg.Sandbox)
+		provider.timeout = timeout
 		if err := provider.ValidateConfig(); err != nil {
 			return nil, err
 		}
@@ -56,6 +67,15 @@ func NewProvider(cfg config.LLMConfig) (Provider, error) {
 	default:
 		return NewLangChainProvider(cfg)
 	}
+}
+
+// callTimeout resolves the effective per-call deadline: an explicit opts value
+// wins, otherwise the provider's configured default. 0 means no limit.
+func callTimeout(opts CompletionOpts, configured time.Duration) time.Duration {
+	if opts.Timeout > 0 {
+		return opts.Timeout
+	}
+	return configured
 }
 
 // SystemMsg is a convenience constructor.

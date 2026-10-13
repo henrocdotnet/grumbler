@@ -1,6 +1,8 @@
 package pipeline
 
 import (
+	"sync"
+
 	"github.com/henrocdotnet/grumbler/internal/config"
 	"github.com/henrocdotnet/grumbler/internal/llm"
 	"github.com/henrocdotnet/grumbler/internal/model"
@@ -24,15 +26,23 @@ type ReviewContext struct {
 	// Options
 	DiffMode int  // 0=staged, 1=all, 2=branch (matches git.DiffMode)
 	Fast     bool // diff-only mode, skip full file content
+
+	// mu guards Suggestions and Errors. Stages fan out over files and batches
+	// with errgroup, so both accumulators are written from multiple goroutines.
+	mu sync.Mutex
 }
 
-// AddSuggestions appends suggestions (thread-safe not needed — stages sync via pipeline).
+// AddSuggestions appends suggestions. Safe for concurrent use.
 func (rc *ReviewContext) AddSuggestions(ss []model.CodeSuggestion) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
 	rc.Suggestions = append(rc.Suggestions, ss...)
 }
 
-// AddError records a non-fatal error.
+// AddError records a non-fatal error. Safe for concurrent use.
 func (rc *ReviewContext) AddError(err error) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
 	rc.Errors = append(rc.Errors, err)
 }
 
