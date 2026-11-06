@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
 
 	"github.com/henrocdotnet/grumbler/internal/llm"
 	glog "github.com/henrocdotnet/grumbler/internal/log"
@@ -13,7 +16,7 @@ import (
 	"github.com/henrocdotnet/grumbler/internal/rules"
 )
 
-// Compliance runs the Spock/McCoy/Scotty review team to identify rule violations.
+// Compliance discovers located violations of the configured review rules.
 type Compliance struct{}
 
 func (Compliance) Name() string { return "compliance" }
@@ -71,59 +74,126 @@ func (Compliance) Execute(ctx context.Context, rc *pipeline.ReviewContext) error
 	}
 	glog.L().Debug("compliance response", "respLen", len(resp))
 
-	violated := parseReviewTeamResponse(resp)
+	violated, err := parseReviewTeamResponse(resp)
+	if err != nil {
+		rc.AddError(err)
+		return nil
+	}
 	glog.L().Debug("compliance violations", "count", len(violated))
 
-	tagViolations(rc, violated)
+	addRuleViolations(rc, violated)
 	return nil
 }
 
-// tagViolations tags existing suggestions with violated rule IDs.
-func tagViolations(rc *pipeline.ReviewContext, violated []reviewTeamViolation) {
-	violatedSet := make(map[string]bool, len(violated))
-	for _, v := range violated {
-		violatedSet[v.ID] = true
-	}
-
-	// Scope each violated rule to the files it actually governs. Without the
-	// glob check every suggestion is tagged with every violated rule, which
-	// makes RuleIDs meaningless on any repo with path-scoped rules.
-	for i := range rc.Suggestions {
-		for _, r := range rules.MatchRules(rc.Rules, rc.Suggestions[i].FilePath) {
-			if violatedSet[r.ID] {
-				rc.Suggestions[i].RuleIDs = append(rc.Suggestions[i].RuleIDs, r.ID)
+// addRuleViolations preserves independently discovered, located violations.
+// A rule matching a file is not evidence that every finding in it violates it.
+func addRuleViolations(rc *pipeline.ReviewContext, violations []reviewTeamViolation) {
+	for index, v := range violations {
+		var rule *rules.Rule
+		for _, r := range rules.MatchRules(rc.Rules, v.FilePath) {
+			if r.ID == v.ID {
+				copy := r
+				rule = &copy
+				break
 			}
 		}
+		var file *model.FileChange
+		for i := range rc.Files {
+			if rc.Files[i].Path == v.FilePath {
+				file = &rc.Files[i]
+				break
+			}
+		}
+		if rule == nil || file == nil || v.Title == "" || v.Reason == "" || v.Snippet == "" || !intersectsAddedLine(file.Patch, v.StartLine, v.EndLine) {
+			rc.AddError(fmt.Errorf("compliance: invalid or unlocated violation %s at %s:%d", v.ID, v.FilePath, v.StartLine))
+			continue
+		}
+		severity := v.Severity
+		if severity == "" {
+			severity = rule.Severity
+		}
+		category := v.Category
+		if category == "" {
+			category = "bug"
+		}
+		if category == "maintainability" {
+			severity = "low"
+		}
+		matched := false
+		for i := range rc.Suggestions {
+			s := &rc.Suggestions[i]
+			if s.FilePath == v.FilePath && s.StartLine <= v.EndLine && v.StartLine <= s.EndLine &&
+				(s.Title == v.Title || strings.TrimSpace(s.Snippet) == strings.TrimSpace(v.Snippet)) {
+				if !containsRuleID(s.RuleIDs, v.ID) {
+					s.RuleIDs = append(s.RuleIDs, v.ID)
+				}
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			rc.AddSuggestions([]model.CodeSuggestion{{
+				ID:       fmt.Sprintf("rule:%s:%s:%d:%d", v.ID, v.FilePath, v.StartLine, index),
+				FilePath: v.FilePath, Language: file.Language,
+				Severity: model.ParseSeverity(severity), SeverityStr: severity,
+				Category: category, Title: v.Title, Description: v.Reason,
+				Snippet: v.Snippet, Proposal: v.Proposal, Synopsis: v.Synopsis,
+				StartLine: v.StartLine, EndLine: v.EndLine, RuleIDs: []string{v.ID},
+			}})
+		}
 	}
+}
+
+func containsRuleID(ids []string, id string) bool {
+	for _, existing := range ids {
+		if existing == id {
+			return true
+		}
+	}
+	return false
+}
+
+var addedPatchLine = regexp.MustCompile(`(?m)^L([0-9]+) +\+`)
+
+func intersectsAddedLine(patch string, start, end int) bool {
+	if start <= 0 || end < start {
+		return false
+	}
+	for _, match := range addedPatchLine.FindAllStringSubmatch(patch, -1) {
+		line, _ := strconv.Atoi(match[1])
+		if start <= line && line <= end {
+			return true
+		}
+	}
+	return false
 }
 
 type reviewTeamViolation struct {
 	ID     string `json:"ruleId"`
 	Reason string `json:"reason"`
+	llmSuggestion
 }
 
 type reviewTeamResponse struct {
 	Rules []reviewTeamViolation `json:"rules"`
 }
 
-func parseReviewTeamResponse(raw string) []reviewTeamViolation {
+func parseReviewTeamResponse(raw string) ([]reviewTeamViolation, error) {
 	extracted := llm.ExtractJSON(raw)
 
 	var resp reviewTeamResponse
-	if err := json.Unmarshal([]byte(extracted), &resp); err != nil {
+	if err := json.Unmarshal([]byte(extracted), &resp); err != nil || resp.Rules == nil {
 		// Fallback: bare array of violations.
 		var arr []reviewTeamViolation
-		if err2 := json.Unmarshal([]byte(extracted), &arr); err2 != nil {
+		if err2 := json.Unmarshal([]byte(extracted), &arr); err2 != nil || arr == nil {
 			preview := raw
 			if len(preview) > 200 {
 				preview = preview[:200]
 			}
-			glog.L().Warn("compliance: could not parse LLM response as JSON, treating as zero violations",
-				"err", err, "preview", preview)
-			return nil
+			return nil, fmt.Errorf("compliance: expected {\"rules\":[...]} or bare array; response preview: %s", preview)
 		}
 		glog.L().Warn("compliance: LLM returned bare array instead of {\"rules\":[...]}")
-		return arr
+		return arr, nil
 	}
-	return resp.Rules
+	return resp.Rules, nil
 }

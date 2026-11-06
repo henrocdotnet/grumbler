@@ -17,7 +17,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.PersistentFlags().String("provider", "", "LLM provider override (anthropic|openai|google|claude-cli|gemini-cli|codex-cli)")
-	rootCmd.PersistentFlags().String("model", "", "LLM model override")
+	rootCmd.PersistentFlags().String("model", "", "LLM model name or CLI alias (Claude examples: sonnet, opus, fable, haiku)")
 	rootCmd.PersistentFlags().StringP("format", "f", "", "Output format (terminal|json|yaml|sarif)")
 	rootCmd.PersistentFlags().String("config", "", "Path to config directory (default: .)")
 }

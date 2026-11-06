@@ -1,6 +1,4 @@
 <context>
-
-Code for Review (PR Diff):
 <codeForAnalysis>
 {{.Diff}}
 </codeForAnalysis>
@@ -8,19 +6,23 @@ Code for Review (PR Diff):
 <rules>
 {{.RulesJSON}}
 </rules>
-
-Your output must always be valid JSON. Under no circumstances should you produce anything other than JSON. Follow the exact format below with no additional text or explanation:
-IMPORTANT: if the array is empty, the output must still conform to the specified JSON format, e.g. { "rules": [] }
-
-<OUTPUT_FORMAT>
-DISCUSSION HERE
-
-```json
-{
-    "rules": [
-        {"ruleId": "ruleId", "reason": ""}
-    ]
-}
-```
-</OUTPUT_FORMAT>
 </context>
+
+Return {"rules": []} when there are no violations. Otherwise return:
+{
+  "rules": [
+    {
+      "ruleId": "ID from the supplied rules",
+      "filePath": "path from a file header",
+      "startLine": 1,
+      "endLine": 1,
+      "title": "Short issue title",
+      "reason": "Concrete finding with trigger, consequence, supporting evidence, and any existing guards",
+      "snippet": "Problematic code at the changed location",
+      "proposal": "Focused fix or contract clarification; empty if not established",
+      "synopsis": "Brief summary",
+      "category": "bug|performance|security|testing|maintainability",
+      "severity": "low|medium|high|critical"
+    }
+  ]
+}

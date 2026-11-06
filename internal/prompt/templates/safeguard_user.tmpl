@@ -1,6 +1,6 @@
 ## Safeguard Review
 
-Assess each suggestion against the source file and diff. Apply the Bouncer's automatic rejection conditions first, then proceed to full panel analysis.
+Assess each finding independently from the correctness of its proposed fix. Use the supporting changed files to verify claims and check for existing guards and tests.
 
 <SourceFile>
 {{.FileContent}}
@@ -9,6 +9,10 @@ Assess each suggestion against the source file and diff. Apply the Bouncer's aut
 <Patch>
 {{.Diff}}
 </Patch>
+
+<SupportingChangedFiles>
+{{.SupportingContext}}
+</SupportingChangedFiles>
 
 <Candidates>
 {{.SuggestionsJSON}}

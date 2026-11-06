@@ -47,10 +47,11 @@ type ReviewTeamData struct {
 
 // SafeguardData holds data for safeguard templates.
 type SafeguardData struct {
-	FileContent     string
-	Diff            string
-	SuggestionsJSON string
-	Date            string
+	FileContent       string
+	Diff              string
+	SupportingContext string
+	SuggestionsJSON   string
+	Date              string
 }
 
 // GuardianData holds data for guardian templates.

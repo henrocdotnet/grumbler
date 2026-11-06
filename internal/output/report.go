@@ -222,6 +222,9 @@ func writeMarkdownSuggestion(b *strings.Builder, s model.CodeSuggestion, fp stri
 	if s.AuditResult != "" {
 		b.WriteString(fmt.Sprintf("*Audit result: %s*\n\n", s.AuditResult))
 	}
+	if s.AuditRationale != "" {
+		b.WriteString("**Audit rationale:** " + s.AuditRationale + "\n\n")
+	}
 
 	b.WriteString("**Changes:**\n")
 	b.WriteString("- [ ] Fixed\n")

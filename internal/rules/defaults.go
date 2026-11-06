@@ -23,7 +23,7 @@ func DefaultRules() []Rule {
 		{
 			ID:       "SEC-003",
 			Name:     "Command Injection",
-			Guidance: "Flag shell command construction from unsanitized user input. Use parameterized execution APIs (e.g., exec.Command with separate args) instead of shell interpolation.",
+			Guidance: "Trace untrusted input into shell syntax and report command injection only when a trust boundary is crossed. Developer-controlled Make arguments intended as shell flags are not automatically attacker input. Prefer argument-based execution when external values are interpolated.",
 			Severity: "critical",
 			Category: "Security",
 			Tags:     []string{"Security", "Input Validation"},
@@ -39,7 +39,7 @@ func DefaultRules() []Rule {
 		{
 			ID:       "ERR-001",
 			Name:     "Swallowed Errors",
-			Guidance: "Detect empty catch blocks, ignored error returns, or discarded error values. Errors must be handled, logged, or explicitly propagated.",
+			Guidance: "Trace ignored errors and report a concrete lost failure, incorrect success, or broken cleanup. Explicit best-effort cleanup, cancellation, and intentionally tolerated errors are not violations merely because a catch block is empty.",
 			Severity: "high",
 			Category: "Error Handling",
 			Tags:     []string{"Error Handling", "Reliability"},
@@ -95,7 +95,7 @@ func DefaultRules() []Rule {
 		{
 			ID:       "LOG-002",
 			Name:     "Debug Artifacts in Production Code",
-			Guidance: "Flag TODO/FIXME/HACK comments, console.log, fmt.Println, print() statements, and other debug artifacts that should not ship.",
+			Guidance: "Report debug output or unfinished debug behavior only when it exposes data, changes behavior, or creates a concrete operational problem. TODO/FIXME/HACK comments and ordinary CLI output are not defects by themselves.",
 			Severity: "low",
 			Category: "Observability",
 			Tags:     []string{"Observability", "Code Quality"},
@@ -103,7 +103,7 @@ func DefaultRules() []Rule {
 		{
 			ID:       "TEST-001",
 			Name:     "Missing Error Case Tests",
-			Guidance: "When new error paths are introduced, corresponding test cases for those error conditions should be present or added.",
+			Guidance: "For changed error paths and behavior, check all visible test files for the relevant trigger and assertion before reporting missing coverage. Name the changed behavior and missing assertion. Do not require duplicate coverage in each test file or infer no tests exist from an incomplete batch.",
 			Severity: "medium",
 			Category: "Testing",
 			Tags:     []string{"Testing", "Reliability"},
@@ -123,6 +123,30 @@ func DefaultRules() []Rule {
 			Severity: "high",
 			Category: "Reliability",
 			Tags:     []string{"Reliability", "Resource Management"},
+		},
+		{
+			ID:       "SEC-005",
+			Name:     "Destructive Operation Boundaries",
+			Guidance: "Check destination-based write/delete guards against all accepted backend configuration forms. When a denylist recognizes only canonical names but arbitrary origins are accepted, describe the exact boundary and existing system/resource guards as a low-severity maintainability note. Do not invent alternate production routes or claim a proven bypass without evidence. Prefer an explicit write policy or documentation of the boundary. Trace hostname, default-port, and path normalization before claiming different input strings bypass a destination check.",
+			Severity: "low",
+			Category: "Security",
+			Tags:     []string{"Security", "Configuration"},
+		},
+		{
+			ID:       "API-002",
+			Name:     "Dependency Contract Coupling",
+			Guidance: "Identify changed accessibility or focus behavior coupled to third-party DOM selectors or undocumented dependency internals. Name the selector and behavior, acknowledge existing regression tests, and recommend documenting the contract or using a supported API when available. Report at low severity as maintainability unless a current failure is proven; do not invent a dependency change. Focus assertions are evidence that a DOM change will be caught, not evidence of a silent test failure. Recommend a ref only when the visible dependency contract supports it; otherwise a selector-contract comment is sufficient.",
+			Severity: "low",
+			Category: "Maintainability",
+			Tags:     []string{"Accessibility", "Compatibility"},
+		},
+		{
+			ID:       "ERR-004",
+			Name:     "Configuration Capability Invariants",
+			Guidance: "Trace capability predicates across supported configurations, including disabled, stub, and live modes. Identify a concrete predicate that returns true for an unsupported mode and the separate caller/configuration guard that blocks execution. Describe both as a low-severity maintainability concern and recommend an explicit local precondition. Do not label the unreachable path a runtime failure or flag fail-closed guards merely because they are distributed across functions.",
+			Severity: "low",
+			Category: "Maintainability",
+			Tags:     []string{"Configuration", "Reliability"},
 		},
 	}
 }

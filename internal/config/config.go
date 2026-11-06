@@ -28,8 +28,9 @@ type LLMConfig struct {
 	MaxTokens int    `yaml:"maxTokens"`
 	BaseURL   string `yaml:"baseUrl,omitempty"`
 
-	// ReasoningEffort is passed to codex-cli as model_reasoning_effort.
-	// One of: minimal|low|medium|high|xhigh|max|ultra. Empty = provider default.
+	// ReasoningEffort is passed to claude-cli as --effort and to codex-cli as
+	// model_reasoning_effort. Claude accepts low|medium|high|xhigh|max;
+	// Codex also accepts minimal|ultra. Empty = provider default.
 	ReasoningEffort string `yaml:"reasoningEffort,omitempty"`
 	// Sandbox is the codex-cli sandbox policy: read-only|workspace-write|danger-full-access.
 	Sandbox string `yaml:"sandbox,omitempty"`
@@ -70,9 +71,8 @@ type PassesConfig struct {
 	Audit      bool `yaml:"audit"`
 	CrossFile  bool `yaml:"crossFile"`
 
-	// MaxContextTokens caps the whole-diff prompts built by the compliance and
-	// crossfile passes, which are otherwise unbounded and overflow the model's
-	// context window on large branches.
+	// MaxContextTokens caps whole-diff context for compliance/crossfile and
+	// the complete rendered audit prompts, including supporting changed files.
 	MaxContextTokens int `yaml:"maxContextTokens"`
 	// OnOverflow selects behaviour when those prompts exceed the budget:
 	// "truncate" (default) or "skip".
@@ -193,6 +193,9 @@ func (c *Config) Validate() error {
 	}
 	if e := c.LLM.ReasoningEffort; e != "" && !validReasoningEfforts[e] {
 		return fmt.Errorf("llm.reasoningEffort: unknown value %q (want minimal|low|medium|high|xhigh|max|ultra)", e)
+	}
+	if e := c.LLM.ReasoningEffort; strings.EqualFold(c.LLM.Provider, "claude-cli") && (e == "minimal" || e == "ultra") {
+		return fmt.Errorf("llm.reasoningEffort: %q is not supported by claude-cli (want low|medium|high|xhigh|max)", e)
 	}
 	if sb := c.LLM.Sandbox; sb != "" && !validSandboxes[sb] {
 		return fmt.Errorf("llm.sandbox: unknown value %q (want read-only|workspace-write|danger-full-access)", sb)

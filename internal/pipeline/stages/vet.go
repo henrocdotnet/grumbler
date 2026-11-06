@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/henrocdotnet/grumbler/internal/llm"
@@ -14,7 +16,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Audit runs the Bouncer/Syntax/Logic/Style/Arbiter audit panel.
+// Audit verifies findings using supporting code and checks proposals separately.
 type Audit struct{}
 
 func (Audit) Name() string { return "audit" }
@@ -52,6 +54,14 @@ func (Audit) Execute(ctx context.Context, rc *pipeline.ReviewContext) error {
 			if err != nil {
 				glog.L().Error("audit file failed", "path", filePath, "err", err)
 				rc.AddError(fmt.Errorf("audit %s: %w", filePath, err))
+				mu.Lock()
+				for i := range rc.Suggestions {
+					if rc.Suggestions[i].FilePath == filePath {
+						rc.Suggestions[i].AuditResult = "unresolved"
+						rc.Suggestions[i].AuditRationale = err.Error()
+					}
+				}
+				mu.Unlock()
 				return nil
 			}
 			glog.L().Debug("audit file done", "path", filePath, "verdicts", len(verdicts))
@@ -66,28 +76,9 @@ func (Audit) Execute(ctx context.Context, rc *pipeline.ReviewContext) error {
 }
 
 func auditFile(ctx context.Context, rc *pipeline.ReviewContext, file model.FileChange, suggestions []model.CodeSuggestion) ([]auditVerdict, error) {
-	systemPrompt, err := prompt.Render("safeguard_system", prompt.SafeguardData{})
+	msgs, err := auditMessages(rc, file, suggestions)
 	if err != nil {
 		return nil, err
-	}
-
-	sugJSON, err := json.Marshal(suggestions)
-	if err != nil {
-		return nil, err
-	}
-
-	userPrompt, err := prompt.Render("safeguard_user", prompt.SafeguardData{
-		FileContent:     file.Content,
-		Diff:            file.Patch,
-		SuggestionsJSON: string(sugJSON),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	msgs := []llm.Message{
-		llm.SystemMsg(systemPrompt),
-		llm.UserMsg(userPrompt),
 	}
 
 	// One retry loop, not two. This previously wrapped llm.Retry(ctx, 2, ...)
@@ -106,6 +97,17 @@ func auditFile(ctx context.Context, rc *pipeline.ReviewContext, file model.FileC
 		}
 		glog.L().Debug("audit response", "respLen", len(resp), "attempt", attempt)
 		verdicts, err := parseAuditResponse(resp)
+		if err == nil {
+			err = validateAuditVerdicts(verdicts, suggestions)
+		}
+		if err == nil {
+			for _, v := range verdicts {
+				if v.Verdict == "revise" && v.StartLine > 0 && !intersectsAddedLine(file.Patch, v.StartLine, v.EndLine) {
+					err = fmt.Errorf("audit: revised location for %q does not intersect changed lines", v.ID)
+					break
+				}
+			}
+		}
 		if err != nil {
 			lastErr = err
 			glog.L().Warn("audit parse retry", "path", file.Path, "attempt", attempt, "err", err)
@@ -116,18 +118,103 @@ func auditFile(ctx context.Context, rc *pipeline.ReviewContext, file model.FileC
 	return nil, lastErr
 }
 
+// auditMessages keeps cross-file evidence and counter-evidence available to
+// audit, even when discovery placed the files in separate inspect batches.
+// The budget covers both rendered prompts, including candidates and markers.
+func auditMessages(rc *pipeline.ReviewContext, file model.FileChange, suggestions []model.CodeSuggestion) ([]llm.Message, error) {
+	systemPrompt, err := prompt.Render("safeguard_system", &prompt.SafeguardData{})
+	if err != nil {
+		return nil, err
+	}
+	sugJSON, err := json.Marshal(suggestions)
+	if err != nil {
+		return nil, err
+	}
+	data := prompt.SafeguardData{
+		FileContent:     contentForPrompt(file, rc.Fast, rc.Config.Review.MaxFileContentTokens),
+		Diff:            file.Patch,
+		SuggestionsJSON: string(sugJSON),
+	}
+	budget := contextBudget(rc.Config.Passes.MaxContextTokens)
+	const omitted = "\n[Context limited: some changed-file content was omitted. Missing evidence is not counter-evidence; use unresolved when needed.]\n"
+	render := func() (string, error) { return prompt.Render("safeguard_user", &data) }
+	userPrompt, err := render()
+	if err != nil {
+		return nil, err
+	}
+	// Leave room for the omission marker even if no supporting file fits.
+	remaining := budget - countTokens(systemPrompt+userPrompt+omitted) - 32
+	if remaining < 0 {
+		return nil, fmt.Errorf("audit context for %s exceeds %d tokens", file.Path, budget)
+	}
+	files := append([]model.FileChange(nil), rc.Files...)
+	// Prioritize explicitly cited evidence; stable ordering makes omissions
+	// reproducible. All remaining changed files can supply guards or tests.
+	sort.SliceStable(files, func(i, j int) bool {
+		return strings.Contains(string(sugJSON), files[i].Path) && !strings.Contains(string(sugJSON), files[j].Path)
+	})
+	limited := data.FileContent != file.Content && file.Content != ""
+	// Preserve changed-line coverage before spending the remaining budget on
+	// supplementary source. Otherwise early large files crowd out later callers
+	// and tests, recreating the context loss audit is meant to avoid.
+	for _, other := range files {
+		if other.Path == file.Path {
+			continue
+		}
+		chunk := fmt.Sprintf("=== %s ===\nPatch:\n%s\n\n", other.Path, other.Patch)
+		cost := countTokens(chunk)
+		if cost > remaining {
+			limited = true
+			continue
+		}
+		data.SupportingContext += chunk
+		remaining -= cost
+	}
+	for _, other := range files {
+		if other.Path == file.Path || other.Content == "" {
+			continue
+		}
+		content := contentForPrompt(other, rc.Fast, rc.Config.Review.MaxFileContentTokens)
+		if content == "" {
+			limited = true
+			continue
+		}
+		chunk := fmt.Sprintf("=== %s (source) ===\n%s\n\n", other.Path, content)
+		cost := countTokens(chunk)
+		if cost > remaining {
+			limited = true
+			continue
+		}
+		data.SupportingContext += chunk
+		remaining -= cost
+		limited = limited || content != other.Content
+	}
+	if limited {
+		data.SupportingContext += omitted
+	}
+	userPrompt, err = render()
+	if err != nil {
+		return nil, err
+	}
+	if countTokens(systemPrompt+userPrompt) > budget {
+		return nil, fmt.Errorf("audit context for %s exceeds %d tokens", file.Path, budget)
+	}
+	return []llm.Message{llm.SystemMsg(systemPrompt), llm.UserMsg(userPrompt)}, nil
+}
+
 type auditVerdict struct {
-	ID          string `json:"id"`
-	Description string `json:"description"`
-	Snippet     string `json:"snippet"`
-	Proposal    string `json:"proposal"`
-	Synopsis    string `json:"synopsis"`
-	StartLine   int    `json:"startLine"`
-	EndLine     int    `json:"endLine"`
-	Category    string `json:"category"`
-	Severity    string `json:"severity"`
-	Verdict     string `json:"verdict"` // keep, revise, reject
-	Rationale   string `json:"rationale"`
+	ID          string  `json:"id"`
+	Title       string  `json:"title"`
+	Description string  `json:"description"`
+	Snippet     string  `json:"snippet"`
+	Proposal    *string `json:"proposal"`
+	Synopsis    string  `json:"synopsis"`
+	StartLine   int     `json:"startLine"`
+	EndLine     int     `json:"endLine"`
+	Category    string  `json:"category"`
+	Severity    string  `json:"severity"`
+	Verdict     string  `json:"verdict"` // keep, revise, reject, unresolved
+	Rationale   string  `json:"rationale"`
 }
 
 type auditResponse struct {
@@ -139,28 +226,66 @@ func parseAuditResponse(raw string) ([]auditVerdict, error) {
 
 	// Try object shape first: {"reviews": [...]}
 	var resp auditResponse
-	if err := json.Unmarshal([]byte(extracted), &resp); err == nil {
+	if err := json.Unmarshal([]byte(extracted), &resp); err == nil && resp.Reviews != nil {
 		return resp.Reviews, nil
 	}
 
 	// Fallback: bare array [{...}, ...]
 	var verdicts []auditVerdict
-	if err := json.Unmarshal([]byte(extracted), &verdicts); err != nil {
+	if err := json.Unmarshal([]byte(extracted), &verdicts); err != nil || verdicts == nil {
 		preview := raw
 		if len(preview) > 200 {
 			preview = preview[:200]
 		}
-		return nil, fmt.Errorf("audit: LLM response is not valid JSON (expected {\"reviews\":[...]} or bare array)\n  parse error: %w\n  response preview: %s", err, preview)
+		return nil, fmt.Errorf("audit: expected {\"reviews\":[...]} or bare array\n  response preview: %s", preview)
 	}
 
 	glog.L().Warn("audit: LLM returned bare array instead of {\"reviews\":[...]}")
 	return verdicts, nil
 }
 
+func validateAuditVerdicts(verdicts []auditVerdict, suggestions []model.CodeSuggestion) error {
+	expected := make(map[string]bool, len(suggestions))
+	for _, s := range suggestions {
+		expected[s.ID] = false
+	}
+	for _, v := range verdicts {
+		seen, ok := expected[v.ID]
+		if !ok || seen {
+			return fmt.Errorf("audit: unexpected or duplicate candidate ID %q", v.ID)
+		}
+		switch v.Verdict {
+		case "keep", "reject", "unresolved":
+		case "revise":
+			if v.Proposal == nil {
+				return fmt.Errorf("audit: revised candidate %q needs a proposal (empty clears it)", v.ID)
+			}
+			if v.Severity != "" && v.Severity != "low" && v.Severity != "medium" && v.Severity != "high" && v.Severity != "critical" {
+				return fmt.Errorf("audit: invalid revised severity %q for %q", v.Severity, v.ID)
+			}
+			if (v.StartLine != 0 || v.EndLine != 0) && (v.StartLine <= 0 || v.EndLine < v.StartLine) {
+				return fmt.Errorf("audit: invalid revised location for %q", v.ID)
+			}
+		default:
+			return fmt.Errorf("audit: invalid verdict %q for %q", v.Verdict, v.ID)
+		}
+		if strings.TrimSpace(v.Rationale) == "" {
+			return fmt.Errorf("audit: missing rationale for %q", v.ID)
+		}
+		expected[v.ID] = true
+	}
+	for id, seen := range expected {
+		if !seen {
+			return fmt.Errorf("audit: missing verdict for %q", id)
+		}
+	}
+	return nil
+}
+
 func applyAuditVerdicts(rc *pipeline.ReviewContext, filePath string, verdicts []auditVerdict) {
 	verdictMap := make(map[string]*auditVerdict, len(verdicts))
 	for i := range verdicts {
-		// Match by index position since we may not have stable IDs
+		// IDs remain stable across discovery, compliance, and cross-file review.
 		verdictMap[verdicts[i].ID] = &verdicts[i]
 	}
 
@@ -179,24 +304,52 @@ func applyAuditVerdicts(rc *pipeline.ReviewContext, filePath string, verdicts []
 }
 
 // applyAuditVerdict records one verdict on a suggestion; "revise" also
-// replaces any non-empty revised fields.
+// replaces revised fields and can explicitly clear an unsafe proposal.
 func applyAuditVerdict(s *model.CodeSuggestion, v *auditVerdict) {
+	s.AuditRationale = v.Rationale
 	switch v.Verdict {
 	case "reject":
 		s.AuditResult = "discard"
 	case "revise":
 		s.AuditResult = "update"
-		if v.Proposal != "" {
-			s.Proposal = v.Proposal
+		if v.Title != "" {
+			s.Title = v.Title
+		} else if v.Synopsis != "" && ((v.Category != "" && v.Category != s.Category) || (v.StartLine > 0 && v.StartLine != s.StartLine)) {
+			// Older prompt overrides do not emit title. A reclassified or
+			// relocated finding still needs a heading describing its new claim.
+			s.Title = v.Synopsis
+		}
+		if v.Proposal != nil {
+			s.Proposal = *v.Proposal
 		}
 		if v.Description != "" {
 			s.Description = v.Description
 		}
+		if v.Snippet != "" {
+			s.Snippet = v.Snippet
+		}
+		if v.StartLine > 0 {
+			s.StartLine, s.EndLine = v.StartLine, v.EndLine
+		}
 		if v.Synopsis != "" {
 			s.Synopsis = v.Synopsis
 		}
-	default:
+		if v.Category != "" {
+			s.Category = v.Category
+		}
+		if v.Severity != "" {
+			s.Severity = model.ParseSeverity(v.Severity)
+			s.SeverityStr = s.Severity.String()
+		}
+	case "keep":
 		s.AuditResult = "fix"
+	case "unresolved":
+		s.AuditResult = "unresolved"
+		if v.Proposal != nil && *v.Proposal == "" {
+			s.Proposal = ""
+		}
+	default:
+		s.AuditResult = "unresolved"
 	}
 }
 

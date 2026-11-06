@@ -50,7 +50,7 @@ func NewProvider(cfg config.LLMConfig) (Provider, error) {
 
 	switch strings.ToLower(cfg.Provider) {
 	case "claude-cli":
-		p := NewClaudeCLIWithModel(cfg.Model)
+		p := NewClaudeCLIWithOptions(cfg.Model, cfg.ReasoningEffort)
 		p.timeout = timeout
 		return p, nil
 	case "gemini-cli":

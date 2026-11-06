@@ -15,6 +15,7 @@ import (
 // ClaudeCLI shells out to `claude -p` for LLM calls without API keys.
 type ClaudeCLI struct {
 	model   string // optional; empty = CLI default
+	effort  string // optional; empty = CLI default
 	timeout time.Duration
 
 	// last call usage (populated from JSON output)
@@ -42,6 +43,11 @@ func NewClaudeCLI() *ClaudeCLI { return &ClaudeCLI{} }
 
 func NewClaudeCLIWithModel(model string) *ClaudeCLI { return &ClaudeCLI{model: model} }
 
+// NewClaudeCLIWithOptions configures the model and optional --effort level.
+func NewClaudeCLIWithOptions(model, effort string) *ClaudeCLI {
+	return &ClaudeCLI{model: model, effort: effort}
+}
+
 func (c *ClaudeCLI) Complete(ctx context.Context, msgs []Message, opts CompletionOpts) (string, error) {
 	var systemPrompt, userPrompt string
 	for _, m := range msgs {
@@ -58,6 +64,9 @@ func (c *ClaudeCLI) Complete(ctx context.Context, msgs []Message, opts Completio
 	if c.model != "" {
 		args = append(args, "--model", c.model)
 	}
+	if c.effort != "" {
+		args = append(args, "--effort", c.effort)
+	}
 
 	if systemPrompt != "" {
 		args = append(args, "--system-prompt", systemPrompt)
@@ -72,7 +81,7 @@ func (c *ClaudeCLI) Complete(ctx context.Context, msgs []Message, opts Completio
 		defer cancel()
 	}
 
-	glog.L().Debug("claude-cli call", "stdinLen", len(userPrompt), "timeout", timeout)
+	glog.L().Debug("claude-cli call", "model", c.model, "effort", c.effort, "stdinLen", len(userPrompt), "timeout", timeout)
 	start := time.Now()
 
 	cmd := exec.CommandContext(ctx, "claude", args...)

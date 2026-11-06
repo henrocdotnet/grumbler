@@ -44,6 +44,9 @@ func buildTerminalMD(result model.ReviewResult) string {
 			if s.AuditResult != "" {
 				b.WriteString(fmt.Sprintf("*Audit result: %s*\n\n", s.AuditResult))
 			}
+			if s.AuditRationale != "" {
+				b.WriteString("**Audit rationale:** " + s.AuditRationale + "\n\n")
+			}
 			if i < len(result.Suggestions)-1 {
 				b.WriteString("---\n\n")
 			}

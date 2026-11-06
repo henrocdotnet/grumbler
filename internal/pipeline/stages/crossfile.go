@@ -49,6 +49,11 @@ func (CrossFile) Execute(ctx context.Context, rc *pipeline.ReviewContext) error 
 
 Only report issues you can PROVE from the visible diffs. No speculation.
 
+Also report concrete low-severity maintainability observations about safety-boundary assumptions,
+dependency contracts, or configuration capability invariants. Identify existing guards and tests;
+do not present a guarded or hypothetical path as a current runtime failure. Check tests across
+all visible files before reporting missing coverage.
+
 Return JSON:
 ` + "```json\n" + `{
     "suggestions": [
@@ -61,7 +66,7 @@ Return JSON:
             "filePath": "affected/file/path",
             "startLine": 1,
             "endLine": 10,
-            "category": "bug|performance|security",
+            "category": "bug|performance|security|testing|maintainability",
             "severity": "low|medium|high|critical"
         }
     ]

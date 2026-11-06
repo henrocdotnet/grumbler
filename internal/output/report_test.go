@@ -218,3 +218,33 @@ func TestMarkdown_Fixture(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditRationalePersistsAcrossReports(t *testing.T) {
+	rw := newTempReportWriter(t)
+	result := testFixture()
+	result.Suggestions = result.Suggestions[:1]
+	result.Suggestions[0].AuditResult = "unresolved"
+	result.Suggestions[0].AuditRationale = "Missing the caller that establishes the destination."
+	for name, write := range map[string]func() error{
+		"json":     func() error { return rw.Final(result) },
+		"yaml":     func() error { return rw.YAML(result) },
+		"markdown": func() error { return rw.Markdown(result, false) },
+		"sarif":    func() error { return rw.SARIF(result) },
+	} {
+		if err := write(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	for _, name := range []string{"grumbler.report.json", "grumbler.report.yaml", "grumbler.report.md", "grumbler.report.sarif.json"} {
+		data, err := os.ReadFile(filepath.Join(rw.dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), result.Suggestions[0].AuditRationale) || !strings.Contains(string(data), "unresolved") {
+			t.Errorf("%s lost audit status/rationale", name)
+		}
+	}
+	if md := buildTerminalMD(result); !strings.Contains(md, result.Suggestions[0].AuditRationale) {
+		t.Fatal("terminal lost audit rationale")
+	}
+}

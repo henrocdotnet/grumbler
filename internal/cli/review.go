@@ -39,7 +39,7 @@ func init() {
 	reviewCmd.Flags().Bool("all", false, "Include all uncommitted changes (staged + unstaged)")
 	reviewCmd.Flags().Bool("fast", false, "Diff-only mode (skip full file content)")
 	reviewCmd.Flags().Bool(flagIncludeFileContent, false, "Embed each changed file's full content alongside its diff (slower, deeper)")
-	reviewCmd.Flags().String("reasoning", "", "Reasoning effort for codex-cli: minimal|low|medium|high|xhigh|max|ultra")
+	reviewCmd.Flags().String("reasoning", "", "Reasoning effort for claude-cli or codex-cli: low|medium|high|xhigh|max (Codex also supports minimal|ultra)")
 	reviewCmd.Flags().Int("max-batch-tokens", 0, "Token budget per inspect batch (0 = config)")
 	reviewCmd.Flags().Int(flagMaxFileTokens, -1, "Cap per-file embedded content in tokens (0 = unlimited, -1 = config)")
 	reviewCmd.Flags().Duration("timeout", 0, "Overall review timeout (0 = config)")

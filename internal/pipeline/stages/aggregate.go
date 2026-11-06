@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"strconv"
+	"strings"
 
 	glog "github.com/henrocdotnet/grumbler/internal/log"
 	"github.com/henrocdotnet/grumbler/internal/model"
@@ -37,6 +38,21 @@ func (Aggregate) Execute(_ context.Context, rc *pipeline.ReviewContext) error {
 			continue
 		}
 		seen[key] = true
+		duplicate := false
+		for i := range deduped {
+			if sameAdvisoryEvidence(deduped[i], s) {
+				for _, id := range s.RuleIDs {
+					if !containsRuleID(deduped[i].RuleIDs, id) {
+						deduped[i].RuleIDs = append(deduped[i].RuleIDs, id)
+					}
+				}
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
+			continue
+		}
 		deduped = append(deduped, s)
 	}
 	glog.L().Debug("aggregate after dedup", "count", len(deduped))
@@ -70,4 +86,22 @@ func (Aggregate) Execute(_ context.Context, rc *pipeline.ReviewContext) error {
 	glog.L().Debug("aggregate exit", "suggestionsOut", len(filtered))
 	rc.Suggestions = filtered
 	return nil
+}
+
+// Independent passes can describe the same advisory using a whole expression
+// versus its nested selector. Limit containment merging to located, supported
+// maintainability notes; distinct defect categories and unresolved claims must
+// remain independently visible.
+func sameAdvisoryEvidence(a, b model.CodeSuggestion) bool {
+	if a.Category != "maintainability" || b.Category != a.Category || a.FilePath != b.FilePath ||
+		a.StartLine <= 0 || b.StartLine <= 0 || a.EndLine < b.StartLine || b.EndLine < a.StartLine ||
+		a.AuditResult == "unresolved" || b.AuditResult == "unresolved" {
+		return false
+	}
+	left := strings.Join(strings.Fields(a.Snippet), " ")
+	right := strings.Join(strings.Fields(b.Snippet), " ")
+	if len(left) < 24 || len(right) < 24 {
+		return false
+	}
+	return strings.Contains(left, right) || strings.Contains(right, left)
 }

@@ -112,14 +112,8 @@ func TestParseAuditResponse_MalformedJSON(t *testing.T) {
 }
 
 func TestParseAuditResponse_MissingReviewsKey(t *testing.T) {
-	// Valid JSON object but no "reviews" key — Go unmarshal succeeds with nil slice.
-	// This documents that behavior: no error, empty result.
 	input := `{"data":[{"id":"1"}]}`
-	verdicts, err := parseAuditResponse(input)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(verdicts) != 0 {
-		t.Errorf("got %d verdicts, want 0 (missing reviews key yields nil slice)", len(verdicts))
+	if _, err := parseAuditResponse(input); err == nil {
+		t.Fatal("missing reviews key must not be treated as a completed audit")
 	}
 }

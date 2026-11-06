@@ -83,3 +83,39 @@ func TestDurationAccessors(t *testing.T) {
 		t.Errorf(`"0" timeout = %v, want 0 (no limit)`, got)
 	}
 }
+
+func TestValidateReasoningEffortForClaudeCLI(t *testing.T) {
+	for _, provider := range []string{"claude-cli", "CLAUDE-CLI"} {
+		for _, effort := range []string{"", "low", "medium", "high", "xhigh", "max", "minimal", "ultra"} {
+			t.Run(provider+"/"+effort, func(t *testing.T) {
+				cfg := Defaults()
+				cfg.LLM.Provider = provider
+				cfg.LLM.ReasoningEffort = effort
+				err := cfg.Validate()
+				unsupported := effort == "minimal" || effort == "ultra"
+				if (err != nil) != unsupported {
+					t.Fatalf("effort %q: got error %v, unsupported=%v", effort, err, unsupported)
+				}
+				if unsupported && !strings.Contains(err.Error(), "claude-cli") {
+					t.Fatalf("error needs provider-specific guidance: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestReasoningOverrideAfterProviderChange(t *testing.T) {
+	cfg := Defaults()
+	cfg.LLM.Provider = "codex-cli"
+	cfg.LLM.ReasoningEffort = "ultra"
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	(&Overrides{Provider: "claude-cli", ReasoningEffort: "high"}).Apply(cfg)
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LLM.ReasoningEffort != "high" {
+		t.Fatal("CLI effort did not override configuration")
+	}
+}

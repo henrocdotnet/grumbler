@@ -130,6 +130,11 @@ func countChangedLines(lines []string) (added, deleted int) {
 // resolveRemoteRef returns "origin/<ref>" if that remote ref exists,
 // otherwise falls back to the local ref.
 func resolveRemoteRef(dir, ref string) string {
+	// Revision expressions are relative to the exact ref the caller supplied.
+	// Prefixing HEAD^ with origin/ silently selects the remote HEAD's parent.
+	if ref == "HEAD" || strings.ContainsAny(ref, "^~:@{}") {
+		return ref
+	}
 	// Already qualified (e.g. "origin/main" or "refs/heads/main").
 	if isQualifiedRef(dir, ref) {
 		return ref

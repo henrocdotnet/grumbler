@@ -46,10 +46,11 @@ type sarifDefaultConfig struct {
 }
 
 type sarifResult struct {
-	RuleID    string           `json:"ruleId"`
-	Level     string           `json:"level"`
-	Message   sarifMultiformat `json:"message"`
-	Locations []sarifLocation  `json:"locations"`
+	RuleID     string            `json:"ruleId"`
+	Level      string            `json:"level"`
+	Message    sarifMultiformat  `json:"message"`
+	Locations  []sarifLocation   `json:"locations"`
+	Properties map[string]string `json:"properties,omitempty"`
 }
 
 type sarifLocation struct {
@@ -86,10 +87,15 @@ func WriteSARIF(w io.Writer, result model.ReviewResult) error {
 	}
 
 	for _, s := range result.Suggestions {
+		var properties map[string]string
+		if s.AuditResult != "" || s.AuditRationale != "" {
+			properties = map[string]string{"auditResult": s.AuditResult, "auditRationale": s.AuditRationale}
+		}
 		log.Runs[0].Results = append(log.Runs[0].Results, sarifResult{
-			RuleID:  s.Category,
-			Level:   severityToSARIF(s.Severity),
-			Message: sarifMultiformat{Text: fmt.Sprintf("%s: %s", s.Title, s.Description)},
+			RuleID:     s.Category,
+			Level:      severityToSARIF(s.Severity),
+			Message:    sarifMultiformat{Text: fmt.Sprintf("%s: %s", s.Title, s.Description)},
+			Properties: properties,
 			Locations: []sarifLocation{{
 				PhysicalLocation: sarifPhysical{
 					ArtifactLocation: sarifArtifact{URI: s.FilePath},

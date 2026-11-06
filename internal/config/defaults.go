@@ -5,7 +5,7 @@ func Defaults() *Config {
 	return &Config{
 		LLM: LLMConfig{
 			Provider:    "claude-cli",
-			Model:       "claude-sonnet-4-6",
+			Model:       "claude-sonnet-5-5",
 			MaxTokens:   16384,
 			Sandbox:     "read-only",
 			CallTimeout: "5m",
@@ -55,7 +55,16 @@ const DefaultConfigYAML = `# Review CLI configuration
 llm:
   # Option A: Claude CLI (no API key needed — uses existing CLI auth)
   provider: claude-cli           # shells out to 'claude -p'
-  model: claude-sonnet-4-6
+  model: claude-sonnet-5-5
+  # Current Claude Code models (verified 2026-10-30):
+  #   claude-fable-5-1   demanding reasoning and long-running work
+  #   claude-opus-5-5    complex coding and review
+  #   claude-sonnet-5-5  balance of speed and intelligence (default)
+  #   claude-haiku-5-5   fast, lightweight work
+  # Aliases: fable|opus|sonnet|haiku track the CLI's provider-specific defaults.
+  # 'best' selects Fable where available, otherwise Opus; 'default' uses the
+  # account default. Full model IDs pin a release. Availability depends on access.
+  # See https://code.claude.com/docs/en/model-config
 
   # Option B: Gemini CLI (no API key needed — uses existing CLI auth)
   # provider: gemini-cli
@@ -78,11 +87,12 @@ llm:
   # apiKey: ${ANTHROPIC_API_KEY} # env var expansion supported
   # maxTokens: 16384
 
-  # Speed / behaviour knobs (codex-cli)
-  # reasoningEffort: low         # low|medium|high|xhigh|max|ultra ('ultra' unsupported on luna)
-  #                              # NOTE: 'minimal' returns an empty final message
-  #                              # on some models — measure before adopting it.
-  sandbox: read-only             # read-only|workspace-write|danger-full-access
+  # Effort for Claude CLI or Codex CLI; unset uses the provider default.
+  # reasoningEffort: high        # Claude: low|medium|high|xhigh|max
+  #                              # Codex also accepts minimal|ultra; model support varies.
+  #                              # NOTE: 'minimal' can return an empty final message.
+  # Claude's CLAUDE_CODE_EFFORT_LEVEL environment variable overrides --effort.
+  sandbox: read-only             # codex-cli only: read-only|workspace-write|danger-full-access
   callTimeout: 5m                # bounds a single provider call; 0 = none
 
 review:
@@ -115,6 +125,8 @@ passes:
   reviewTeam: true
   audit: true
   crossFile: true
+  # Audit includes supporting changed files under this budget. If its required
+  # context cannot fit, findings remain unresolved rather than being discarded.
   # The reviewTeam and crossFile passes send the whole diff in one call. Without
   # a cap they overflow the model's context window on a large branch and return
   # nothing.
@@ -138,7 +150,16 @@ const DefaultGlobalConfigYAML = `# Global defaults (shared across all projects)
 llm:
   # Option A: Claude CLI (no API key needed — uses existing CLI auth)
   provider: claude-cli           # shells out to 'claude -p'
-  model: claude-sonnet-4-6
+  model: claude-sonnet-5-5
+  # Current Claude Code models (verified 2026-10-30):
+  #   claude-fable-5-1   demanding reasoning and long-running work
+  #   claude-opus-5-5    complex coding and review
+  #   claude-sonnet-5-5  balance of speed and intelligence (default)
+  #   claude-haiku-5-5   fast, lightweight work
+  # Aliases: fable|opus|sonnet|haiku track the CLI's provider-specific defaults.
+  # 'best' selects Fable where available, otherwise Opus; 'default' uses the
+  # account default. Full model IDs pin a release. Availability depends on access.
+  # See https://code.claude.com/docs/en/model-config
 
   # Option B: Gemini CLI (no API key needed — uses existing CLI auth)
   # provider: gemini-cli
@@ -162,11 +183,12 @@ llm:
   # maxTokens: 16384
   # baseUrl:                     # custom endpoint (corp proxy, local LLM)
 
-  # Speed / behaviour knobs (codex-cli)
-  # reasoningEffort: low         # low|medium|high|xhigh|max|ultra ('ultra' unsupported on luna)
-  #                              # NOTE: 'minimal' returns an empty final message
-  #                              # on some models — measure before adopting it.
-  sandbox: read-only             # read-only|workspace-write|danger-full-access
+  # Effort for Claude CLI or Codex CLI; unset uses the provider default.
+  # reasoningEffort: high        # Claude: low|medium|high|xhigh|max
+  #                              # Codex also accepts minimal|ultra; model support varies.
+  #                              # NOTE: 'minimal' can return an empty final message.
+  # Claude's CLAUDE_CODE_EFFORT_LEVEL environment variable overrides --effort.
+  sandbox: read-only             # codex-cli only: read-only|workspace-write|danger-full-access
   callTimeout: 5m                # bounds a single provider call; 0 = none
 
 review:
@@ -191,7 +213,8 @@ output:
 // DefaultRulesYAML is the scaffold written by the init command.
 const DefaultRulesYAML = `# Review rules
 # Each rule has: id, name, guidance, severity, glob (file pattern), tags, and category.
-# Rules are evaluated by the review team to classify violations.
+# Rules guide discovery and the review team checks violations.
+# Concrete contract observations use category maintainability and severity low.
 # Remove or modify rules to suit your project. Use --no-rules to skip compliance entirely.
 
 rules:
@@ -211,7 +234,7 @@ rules:
 
   - id: SEC-003
     name: "Command Injection"
-    guidance: "Flag shell command construction from unsanitized user input. Use parameterized execution APIs (e.g., exec.Command with separate args) instead of shell interpolation."
+    guidance: "Trace untrusted input into shell syntax and report command injection only when a trust boundary is crossed. Developer-controlled Make arguments intended as shell flags are not automatically attacker input. Prefer argument-based execution when external values are interpolated."
     severity: critical
     category: Security
     tags: [Security, Input Validation]
@@ -225,7 +248,7 @@ rules:
 
   - id: ERR-001
     name: "Swallowed Errors"
-    guidance: "Detect empty catch blocks, ignored error returns, or discarded error values. Errors must be handled, logged, or explicitly propagated."
+    guidance: "Trace ignored errors and report a concrete lost failure, incorrect success, or broken cleanup. Explicit best-effort cleanup, cancellation, and intentionally tolerated errors are not violations merely because a catch block is empty."
     severity: high
     category: Error Handling
     tags: [Error Handling, Reliability]
@@ -239,7 +262,7 @@ rules:
 
   - id: ERR-003
     name: "Missing Error Context"
-    guidance: "Errors propagated up the call stack should be wrapped with context (e.g., fmt.Errorf with %%w) so the origin is traceable without a debugger."
+    guidance: "Errors propagated up the call stack should be wrapped with context (e.g., fmt.Errorf with %w) so the origin is traceable without a debugger."
     severity: medium
     category: Error Handling
     tags: [Error Handling, Observability]
@@ -274,14 +297,14 @@ rules:
 
   - id: LOG-002
     name: "Debug Artifacts in Production Code"
-    guidance: "Flag TODO/FIXME/HACK comments, console.log, fmt.Println, print() statements, and other debug artifacts that should not ship."
+    guidance: "Report debug output or unfinished debug behavior only when it exposes data, changes behavior, or creates a concrete operational problem. TODO/FIXME/HACK comments and ordinary CLI output are not defects by themselves."
     severity: low
     category: Observability
     tags: [Observability, Code Quality]
 
   - id: TEST-001
     name: "Missing Error Case Tests"
-    guidance: "When new error paths are introduced, corresponding test cases for those error conditions should be present or added."
+    guidance: "For changed error paths and behavior, check all visible test files for the relevant trigger and assertion before reporting missing coverage. Name the changed behavior and missing assertion. Do not require duplicate coverage in each test file or infer no tests exist from an incomplete batch."
     severity: medium
     category: Testing
     tags: [Testing, Reliability]
@@ -299,4 +322,25 @@ rules:
     severity: high
     category: Reliability
     tags: [Reliability, Resource Management]
+
+  - id: SEC-005
+    name: "Destructive Operation Boundaries"
+    guidance: "Check destination-based write/delete guards against all accepted backend configuration forms. When a denylist recognizes only canonical names but arbitrary origins are accepted, describe the exact boundary and existing system/resource guards as a low-severity maintainability note. Do not invent alternate production routes or claim a proven bypass without evidence. Prefer an explicit write policy or documentation of the boundary. Trace hostname, default-port, and path normalization before claiming different input strings bypass a destination check."
+    severity: low
+    category: Security
+    tags: [Security, Configuration]
+
+  - id: API-002
+    name: "Dependency Contract Coupling"
+    guidance: "Identify changed accessibility or focus behavior coupled to third-party DOM selectors or undocumented dependency internals. Name the selector and behavior, acknowledge existing regression tests, and recommend documenting the contract or using a supported API when available. Report at low severity as maintainability unless a current failure is proven; do not invent a dependency change. Focus assertions are evidence that a DOM change will be caught, not evidence of a silent test failure. Recommend a ref only when the visible dependency contract supports it; otherwise a selector-contract comment is sufficient."
+    severity: low
+    category: Maintainability
+    tags: [Accessibility, Compatibility]
+
+  - id: ERR-004
+    name: "Configuration Capability Invariants"
+    guidance: "Trace capability predicates across supported configurations, including disabled, stub, and live modes. Identify a concrete predicate that returns true for an unsupported mode and the separate caller/configuration guard that blocks execution. Describe both as a low-severity maintainability concern and recommend an explicit local precondition. Do not label the unreachable path a runtime failure or flag fail-closed guards merely because they are distributed across functions."
+    severity: low
+    category: Maintainability
+    tags: [Configuration, Reliability]
 `

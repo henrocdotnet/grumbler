@@ -84,13 +84,14 @@ func TestIntegration_ReviewTestProject(t *testing.T) {
 		t.Error("expected non-zero prompt token count")
 	}
 
-	// --- Assertion 1: all 15 compliance rules fired ---
+	// Require the defect rules exercised by this fixture. LOG-002 no longer
+	// fires for a TODO or harmless debug print without an operational impact.
 	allRules := map[string]bool{
 		"SEC-001": false, "SEC-002": false, "SEC-003": false, "SEC-004": false,
 		"ERR-001": false, "ERR-002": false, "ERR-003": false,
 		"PERF-001": false, "PERF-002": false,
 		"CONC-001": false,
-		"LOG-001":  false, "LOG-002": false,
+		"LOG-001":  false,
 		"TEST-001": false,
 		"API-001":  false,
 		"RES-001":  false,
@@ -134,7 +135,7 @@ func TestIntegration_ReviewTestProject(t *testing.T) {
 	}
 
 	// --- Assertion 3: pipeline stages ran in expected order ---
-	wantStages := []string{"prepare", "inspect", "compliance", "audit", "crossfile", "aggregate"}
+	wantStages := []string{"prepare", "inspect", "compliance", "crossfile", "audit", "aggregate"}
 	if !reflect.DeepEqual(result.PassesRun, wantStages) {
 		t.Errorf("stages: got %v, want %v", result.PassesRun, wantStages)
 	}
@@ -273,8 +274,8 @@ func runReview(t *testing.T, projDir string) (model.ReviewResult, string) {
 		stages.Prepare{},
 		stages.Inspect{},
 		stages.Compliance{},
-		stages.Audit{},
 		stages.CrossFile{},
+		stages.Audit{},
 		stages.Aggregate{},
 	)
 

@@ -130,3 +130,16 @@ func searchSubstring(s, sub string) bool {
 	}
 	return false
 }
+
+func TestResolveRemoteRefPreservesRevisionExpressions(t *testing.T) {
+	dir := initGitRepo(t)
+	runGit(t, dir, "commit", "--allow-empty", "-m", "second")
+	runGit(t, dir, "remote", "add", "origin", "https://example.invalid/repo.git")
+	runGit(t, dir, "update-ref", "refs/remotes/origin/HEAD", "HEAD")
+	runGit(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
+	for _, ref := range []string{"HEAD", "HEAD^", "HEAD~1", "main^", "main~1", "HEAD@{0}"} {
+		if got := resolveRemoteRef(dir, ref); got != ref {
+			t.Errorf("resolveRemoteRef(%q) = %q, want unchanged expression", ref, got)
+		}
+	}
+}

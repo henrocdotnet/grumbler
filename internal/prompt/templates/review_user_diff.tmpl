@@ -1,5 +1,5 @@
 ## Code Under Review
-Trace execution of the changed code across multiple scenarios and identify defects that will break in production.
+Trace execution of the changed code across multiple scenarios and identify defects and concrete low-severity contract limitations.
 {{range .Files}}
 === File: {{.Path}} ({{.Language}}) ===
 {{if and .Content (not $.Fast)}}
@@ -14,4 +14,4 @@ Code Diff (with line numbers):
 ```
 {{end}}
 For each defect found, set "filePath" to the filename from the file header above.
-Use the diffs to locate changed code (+lines), then trace execution to surface bugs, performance issues, security vulnerabilities, and concrete testing-quality gaps tied to changed behavior.
+Use the diffs to locate changed code (+lines), then trace execution to surface bugs, performance issues, security vulnerabilities, and concrete testing-quality gaps, and low-severity maintainability observations tied to changed behavior.
